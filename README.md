@@ -12,6 +12,7 @@ later in kan worden gezet.
 
 - NICAM bitrate: `728 kbit/s`
 - DQPSK symbolrate: `364 ksym/s`
+- Praktische RF-bandbreedte (deze implementatie): ongeveer `500-750 kHz`
 - Frame: `728 bits`, dus `1 ms`
 - FAW: `01001110`
 - Scrambler: PN9, polynomial `x^9 + x^4 + 1`, seed `111111111`
@@ -65,11 +66,23 @@ Een stream-URL naar direct-QPSK IQ moduleren:
 ```sh
 python -m nicam.stream_tx \
   --stream-url "https://icecast.omroep.nl/radio2-bb-aac" \
+  --ffmpeg-reconnect \
   --out /tmp/radio2-nicam.iq
 ```
 
 `stream_tx` gebruikt `ffmpeg` om de URL of audiobestanden naar `s16le`, stereo,
 32 kHz te decoderen.
+
+Praktisch commando om een internetstream direct door de hele keten te starten:
+
+```sh
+python -m nicam.stream_tx \
+  --stream-url "https://icecast.omroep.nl/radio2-bb-aac" \
+  --ffmpeg-reconnect \
+  | python -m nicam.stream_rx --audio-out - --timing-phase 0 \
+  | ffplay -hide_banner -loglevel error -nodisp \
+      -f s16le -sample_rate 32000 -ch_layout stereo -i -
+```
 
 ## PlutoSDR uitzenden
 
@@ -199,6 +212,9 @@ Dit is bedoeld als pragmatisch startpunt: packet sync, sequence numbers, CRC en
 Opus werken eerst; FEC/interleaving en betere carrier/timing recovery kunnen
 daarna worden toegevoegd.
 
+Belangrijk: de optionele `--fec 3/4` in `opus.qpsk_tx`/`opus.qpsk_rx` is een
+project-experiment en geen onderdeel van de originele NICAM-728 specificatie.
+
 Extra Python dependency:
 
 ```sh
@@ -257,6 +273,64 @@ python -m opus.qpsk_rx \
   | ffplay -hide_banner -loglevel error -nodisp \
       -f s16le -sample_rate 48000 -ch_layout stereo -i -
 ```
+
+## Systemd user-service (RTL-SDR ontvanger)
+
+Voor een installatie waar de repo in `~/nicam-transmitter` staat:
+
+```sh
+mkdir -p ~/.config/systemd/user
+cp ~/nicam-transmitter/systemd/user/nicam-rx.service ~/.config/systemd/user/
+systemctl --user daemon-reload
+systemctl --user enable --now nicam-rx.service
+```
+
+Status en logs:
+
+```sh
+systemctl --user status nicam-rx.service
+journalctl --user -u nicam-rx.service -f
+```
+
+Standaard draait deze service met `rtl_sdr -d 2` op `2324000000` Hz.
+
+RF SNR-indicatie aanzetten (periodieke ontvangstmeting):
+
+```sh
+systemctl --user edit nicam-rx.service
+```
+
+Voeg toe:
+
+```ini
+[Service]
+Environment=EXTRA_RX_ARGS=--rf-snr --rf-snr-interval 1.0
+```
+
+Daarna:
+
+```sh
+systemctl --user daemon-reload
+systemctl --user restart nicam-rx.service
+```
+
+Uitzetten: verwijder deze `Environment=EXTRA_RX_ARGS=...` regel weer (of maak hem leeg) en herstart de service.
+
+Waar zie je het:
+
+- In foreground/terminal: op `stderr` van `python -m nicam.stream_rx`
+- Als systemd user-service: via `journalctl --user -u nicam-rx.service -f`
+
+Voorbeeldregel:
+
+```text
+rf_stats: level=-32.4 dBFS snr_est=18.7 dB
+```
+
+## Referenties
+
+- ETSI ETS 300 163 (NICAM 728, Nov 1994): https://www.etsi.org/deliver/etsi_i_ets/300100_300199/300163/01_60/ets_300163e01p.pdf
+- ETSI EN 300 163 V1.2.1 (Mar 1998, catalogus): https://standards.iteh.ai/catalog/standards/etsi/60810122-7c6b-44ed-9196-311b7673a79c/etsi-ets-300-163-ed-1-1994-11
 
 De huidige defaults gebruiken `1.456 MS/s` en `364 ksym/s`, dus 4 samples per
 symbool. Dat is breder dan strikt nodig voor 128 kbit/s Opus, maar sluit aan op

@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import subprocess
 import sys
+import time
 import wave
 from collections import deque
 from typing import BinaryIO
@@ -83,6 +84,51 @@ def read_exact(source: BinaryIO, size: int) -> bytes:
         chunks.append(chunk)
         remaining -= len(chunk)
     return b"".join(chunks)
+
+
+def estimate_rf_metrics(iq: np.ndarray) -> tuple[float, float] | None:
+    data = np.asarray(iq, dtype=np.complex64)
+    if data.size < 1024:
+        return None
+
+    n = 1024
+    while (n * 2) <= data.size and n < 16384:
+        n *= 2
+
+    seg = data[:n]
+    power = float(np.mean(np.abs(seg) ** 2))
+    signal_dbfs = 10.0 * np.log10(max(power, 1e-12))
+
+    window = np.hanning(n).astype(np.float32)
+    spectrum = np.abs(np.fft.fftshift(np.fft.fft(seg * window))) ** 2
+    if spectrum.size < 16:
+        return None
+    peak_idx = int(np.argmax(spectrum))
+    guard = max(4, n // 256)
+    lo = max(0, peak_idx - guard)
+    hi = min(spectrum.size, peak_idx + guard + 1)
+    mask = np.ones(spectrum.size, dtype=bool)
+    mask[lo:hi] = False
+    if not np.any(mask):
+        return None
+    noise = float(np.median(spectrum[mask]))
+    peak = float(spectrum[peak_idx])
+    snr_db = 10.0 * np.log10(max(peak - noise, 1e-12) / max(noise, 1e-12))
+    return signal_dbfs, snr_db
+
+
+def maybe_print_rf_metrics(iq: np.ndarray, next_report_at: float, interval_s: float) -> float:
+    now = time.monotonic()
+    if now < next_report_at:
+        return next_report_at
+    metrics = estimate_rf_metrics(iq)
+    if metrics is not None:
+        signal_dbfs, snr_db = metrics
+        print(
+            f"rf_stats: level={signal_dbfs:.1f} dBFS snr_est={snr_db:.1f} dB",
+            file=sys.stderr,
+        )
+    return now + interval_s
 
 
 def decode_frame(raw_bits: np.ndarray, max_faw_errors: int):
@@ -327,6 +373,7 @@ def run_stable(args: argparse.Namespace) -> int:
     stats_peak = 0
 
     pending_iq: deque[np.ndarray] = deque()
+    next_rf_report_at = 0.0
 
     try:
         while True:
@@ -337,6 +384,12 @@ def run_stable(args: argparse.Namespace) -> int:
                 if not raw:
                     break
                 iq = u8_iq_to_complex(raw)
+            if args.rf_snr:
+                next_rf_report_at = maybe_print_rf_metrics(
+                    iq,
+                    next_rf_report_at,
+                    args.rf_snr_interval,
+                )
 
             if not locked:
                 lookahead_iq: list[np.ndarray] = []
@@ -716,6 +769,7 @@ def run(args: argparse.Namespace) -> int:
     stats_samples = 0
     stats_sum_squares = 0.0
     stats_peak = 0
+    next_rf_report_at = 0.0
 
     try:
         while True:
@@ -728,6 +782,12 @@ def run(args: argparse.Namespace) -> int:
             chunk_index += 1
 
             iq = u8_iq_to_complex(raw)
+            if args.rf_snr:
+                next_rf_report_at = maybe_print_rf_metrics(
+                    iq,
+                    next_rf_report_at,
+                    args.rf_snr_interval,
+                )
             if args.timing_phase is None:
                 if locked and locked_phase is not None:
                     candidates = [
@@ -1032,6 +1092,17 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--min-repeats", type=int, default=3)
     parser.add_argument("--flag-frames", type=int, default=16)
     parser.add_argument("--stats", action="store_true")
+    parser.add_argument(
+        "--rf-snr",
+        action="store_true",
+        help="print periodic RF level and peak-over-noise SNR estimate",
+    )
+    parser.add_argument(
+        "--rf-snr-interval",
+        type=float,
+        default=1.0,
+        help="seconds between RF stats prints (default: 1.0)",
+    )
     parser.add_argument("--flush-frames", type=int, default=20)
     parser.add_argument("--no-carrier-tracking", action="store_true")
     parser.add_argument("--stable-demod", action="store_true")

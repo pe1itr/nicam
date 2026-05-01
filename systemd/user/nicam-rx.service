@@ -1,0 +1,14 @@
+[Unit]
+Description=NICAM receiver via rtl_sdr (device 2, 2324 MHz)
+After=default.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/nicam-transmitter
+ExecStart=%h/nicam-transmitter/systemd/user/nicam-rx.sh
+Restart=always
+RestartSec=2
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

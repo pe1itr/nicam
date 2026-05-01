@@ -29,21 +29,31 @@ def open_audio_source(args: argparse.Namespace) -> tuple[BinaryIO, subprocess.Po
     if source is None:
         raise SystemExit("Gebruik --stream-url, --audio-file of --tone")
 
-    cmd = [
-        "ffmpeg",
-        "-hide_banner",
-        "-loglevel",
-        "error",
-        "-i",
-        source,
-        "-f",
-        "s16le",
-        "-ac",
-        str(CHANNELS),
-        "-ar",
-        str(AUDIO_SAMPLE_RATE),
-        "-",
-    ]
+    cmd = ["ffmpeg", "-hide_banner", "-loglevel", args.ffmpeg_loglevel]
+    if args.stream_url and args.ffmpeg_reconnect:
+        cmd.extend(
+            [
+                "-reconnect",
+                "1",
+                "-reconnect_streamed",
+                "1",
+                "-reconnect_delay_max",
+                "5",
+            ]
+        )
+    cmd.extend(
+        [
+            "-i",
+            source,
+            "-f",
+            "s16le",
+            "-ac",
+            str(CHANNELS),
+            "-ar",
+            str(AUDIO_SAMPLE_RATE),
+            "-",
+        ]
+    )
     proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=sys.stderr)
     if proc.stdout is None:
         raise RuntimeError("ffmpeg stdout is not available")
@@ -138,6 +148,16 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--amplitude", type=float, default=0.7)
     parser.add_argument("--out", default="-", help="IQ output file, or - for stdout")
     parser.add_argument("--flush-frames", type=int, default=20)
+    parser.add_argument(
+        "--ffmpeg-reconnect",
+        action="store_true",
+        help="enable ffmpeg reconnect flags when using --stream-url",
+    )
+    parser.add_argument(
+        "--ffmpeg-loglevel",
+        default="error",
+        help="ffmpeg loglevel for --stream-url/--audio-file (default: error)",
+    )
     return parser.parse_args(argv)
 
 
