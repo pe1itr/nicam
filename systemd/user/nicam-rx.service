@@ -9,6 +9,9 @@ ExecStart=%h/nicam-transmitter/systemd/user/nicam-rx.sh
 Restart=always
 RestartSec=2
 Environment=PYTHONUNBUFFERED=1
+# Optional:
+# Environment=NICAM_ENV=odroid
+# Environment=NICAM_ENV_FILE=%h/nicam-transmitter/config/environments/odroid.env
 
 [Install]
 WantedBy=default.target

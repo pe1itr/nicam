@@ -1,0 +1,116 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+ENV_NAME="${NICAM_ENV:-$(hostname -s)}"
+ENV_FILE="${NICAM_ENV_FILE:-${REPO_DIR}/config/environments/${ENV_NAME}.env}"
+
+if [[ -f "${ENV_FILE}" ]]; then
+  # shellcheck disable=SC1090
+  source "${ENV_FILE}"
+fi
+
+PYTHON_MODE="${PYTHON_MODE:-src}"
+PYTHON_BIN="${PYTHON_BIN:-python3}"
+VENV_PATH="${VENV_PATH:-${REPO_DIR}/.venv}"
+AUDIO_BACKEND="${AUDIO_BACKEND:-stdout}"
+AUDIO_DEVICE="${AUDIO_DEVICE:-default}"
+
+if [[ "${PYTHON_MODE}" == "venv" ]]; then
+  PYTHON_BIN="${VENV_PATH}/bin/python"
+elif [[ "${PYTHON_MODE}" == "user" ]]; then
+  PYTHON_BIN="${PYTHON_BIN:-python3}"
+elif [[ "${PYTHON_MODE}" != "src" ]]; then
+  echo "Onbekende PYTHON_MODE=${PYTHON_MODE}; gebruik src, user of venv." >&2
+  exit 2
+fi
+
+if [[ "${PYTHON_BIN}" == */* ]]; then
+  if [[ ! -x "${PYTHON_BIN}" ]]; then
+    echo "Python niet uitvoerbaar: ${PYTHON_BIN}" >&2
+    exit 2
+  fi
+elif ! command -v "${PYTHON_BIN}" >/dev/null 2>&1; then
+  echo "Python niet gevonden in PATH: ${PYTHON_BIN}" >&2
+  exit 2
+fi
+
+run_python() {
+  if [[ "${PYTHON_MODE}" == "src" ]]; then
+    PYTHONPATH="${REPO_DIR}/src${PYTHONPATH:+:${PYTHONPATH}}" "${PYTHON_BIN}" "$@"
+  else
+    "${PYTHON_BIN}" "$@"
+  fi
+}
+
+audio_player() {
+  local rate="$1"
+  case "${AUDIO_BACKEND}" in
+    stdout)
+      cat
+      ;;
+    ffplay)
+      ffplay -hide_banner -loglevel error -nodisp \
+        -f s16le -sample_rate "${rate}" -ch_layout stereo -i -
+      ;;
+    aplay)
+      aplay -q -f S16_LE -r "${rate}" -c 2 -D "${AUDIO_DEVICE}"
+      ;;
+    none)
+      cat >/dev/null
+      ;;
+    *)
+      echo "Onbekende AUDIO_BACKEND=${AUDIO_BACKEND}; gebruik stdout, ffplay, aplay of none." >&2
+      exit 2
+      ;;
+  esac
+}
+
+usage() {
+  cat >&2 <<'EOF'
+Gebruik:
+  tools/nicam-run nicam-rx [extra nicam.stream_rx opties]
+  tools/nicam-run wbfm-rx [extra wbfm.rtl_rx opties]
+  tools/nicam-run wbfm-tx [extra wbfm.main opties]
+  tools/nicam-run module <python.module> [args...]
+
+Profielkeuze:
+  NICAM_ENV=<naam> gebruikt config/environments/<naam>.env
+  NICAM_ENV_FILE=/pad/naar/profiel.env gebruikt expliciet profielbestand
+EOF
+}
+
+if [[ $# -lt 1 ]]; then
+  usage
+  exit 2
+fi
+
+cmd="$1"
+shift
+cd "${REPO_DIR}"
+
+case "${cmd}" in
+  nicam-rx)
+    run_python -m nicam.stream_rx "$@" --audio-out - | audio_player "${NICAM_AUDIO_RATE:-32000}"
+    ;;
+  wbfm-rx)
+    run_python -m wbfm.rtl_rx "$@" --audio-out - | audio_player "${WBFM_AUDIO_RATE:-48000}"
+    ;;
+  wbfm-tx)
+    run_python -m wbfm.main "$@"
+    ;;
+  module)
+    if [[ $# -lt 1 ]]; then
+      usage
+      exit 2
+    fi
+    module="$1"
+    shift
+    run_python -m "${module}" "$@"
+    ;;
+  *)
+    usage
+    exit 2
+    ;;
+esac

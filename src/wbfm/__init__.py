@@ -1,1 +1,1 @@
-"""Pluto SDR stereo WBFM transmitter package."""
+"""Stereo WBFM transmitter and RTL-SDR receiver helpers."""

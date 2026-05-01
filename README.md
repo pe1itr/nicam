@@ -178,6 +178,94 @@ Belangrijke WBFM-opties:
 - `--preemphasis-us`: pre-emphasis, standaard `50`
 - `--pilot-level`: 19 kHz pilotniveau
 
+## WBFM broadcast ontvangen
+
+De RTL-SDR WBFM-ontvanger decodeert standaard stereo broadcast-FM: FM
+discriminator, 19 kHz pilot, L-R subcarrier, 50 us de-emphasis en stereo PCM.
+
+Naar WAV opnemen:
+
+```sh
+PYTHONPATH=src python3 -m wbfm.rtl_rx \
+  --device-index 1 \
+  --freq 100700000 \
+  --sample-rate 960000 \
+  --gain 29.7 \
+  --audio-out /tmp/wbfm-rx.wav
+```
+
+Live luisteren met `ffplay`:
+
+```sh
+PYTHONPATH=src python3 -m wbfm.rtl_rx \
+  --device-index 1 \
+  --freq 100700000 \
+  --sample-rate 960000 \
+  --gain 29.7 \
+  --audio-out - \
+  | ffplay -hide_banner -loglevel error -nodisp \
+      -f s16le -sample_rate 48000 -ch_layout stereo -i -
+```
+
+Een offline WBFM IQ-bestand uit de zender terugdecoderen kan met:
+
+```sh
+PYTHONPATH=src python3 -m wbfm.rtl_rx \
+  --iq-in /tmp/wbfm.complex64 \
+  --iq-format complex64 \
+  --audio-out /tmp/wbfm-loop.wav
+```
+
+Na een editable install kun je ook `wbfm-rx` gebruiken in plaats van
+`python3 -m wbfm.rtl_rx`.
+
+## Machineprofielen en uniforme start
+
+Voor machines met verschillende Python-installaties en audio-uitgangen staat er
+een launcher in `tools/nicam-run`. Die laadt eerst een profiel uit
+`config/environments/` en start daarna de juiste module met dezelfde commando's
+op elke host.
+
+Profielkeuze:
+
+```sh
+tools/nicam-run wbfm-rx ...
+NICAM_ENV=odroid tools/nicam-run nicam-rx ...
+NICAM_ENV_FILE=/opt/nicam/local.env tools/nicam-run wbfm-tx ...
+```
+
+Zonder override zoekt de launcher automatisch:
+
+```sh
+config/environments/$(hostname -s).env
+```
+
+Voorbeeldprofielen staan in:
+
+- `config/environments/odroid.env.example`
+- `config/environments/desktop.env.example`
+- `config/environments/user-install.env.example`
+
+De belangrijkste profielvelden:
+
+```sh
+PYTHON_MODE=src        # src, user of venv
+PYTHON_BIN=python3
+VENV_PATH=/home/user/nicam-transmitter/.venv
+AUDIO_BACKEND=aplay   # stdout, ffplay, aplay of none
+AUDIO_DEVICE=plughw:0,0
+NICAM_AUDIO_RATE=32000
+WBFM_AUDIO_RATE=48000
+```
+
+Voorbeelden:
+
+```sh
+tools/nicam-run nicam-rx --device-index 1 --freq 435970000 --gain 29.7
+tools/nicam-run wbfm-rx --device-index 1 --freq 100700000 --gain 29.7
+tools/nicam-run wbfm-tx --config config/config.yaml --source stream --stream-url "https://icecast.omroep.nl/radio2-bb-aac"
+```
+
 De lokale configuratie bevat een operatorprofiel voor een volledige
 amateurvergunning op de amateurbanden:
 
