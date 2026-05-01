@@ -3,6 +3,8 @@ from __future__ import annotations
 import queue
 import shutil
 import subprocess
+import sys
+import time
 from dataclasses import dataclass
 from typing import Iterator
 
@@ -65,46 +67,77 @@ def device_blocks(device: str | int | None, sample_rate: int, block_size: int) -
             yield as_float32_stereo(audio_queue.get())
 
 
-def stream_blocks(stream_url: str, sample_rate: int, block_size: int) -> Iterator[np.ndarray]:
+def stream_blocks(
+    stream_url: str,
+    sample_rate: int,
+    block_size: int,
+    reconnect: bool = True,
+    silence_on_stall: bool = True,
+    reconnect_delay_s: float = 2.0,
+) -> Iterator[np.ndarray]:
     if shutil.which("ffmpeg") is None:
         raise RuntimeError("ffmpeg is nodig voor --source stream, maar staat niet in PATH.")
 
-    cmd = [
-        "ffmpeg",
-        "-hide_banner",
-        "-loglevel",
-        "warning",
-        "-i",
-        stream_url,
-        "-vn",
-        "-ac",
-        "2",
-        "-ar",
-        str(sample_rate),
-        "-f",
-        "f32le",
-        "pipe:1",
-    ]
-    proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
     bytes_per_block = block_size * 2 * 4
-    try:
+    silence = np.zeros((block_size, 2), dtype=np.float32)
+
+    while True:
+        cmd = ["ffmpeg", "-hide_banner", "-loglevel", "warning"]
+        if reconnect:
+            cmd.extend(
+                [
+                    "-reconnect",
+                    "1",
+                    "-reconnect_streamed",
+                    "1",
+                    "-reconnect_delay_max",
+                    "5",
+                ]
+            )
+        cmd.extend(
+            [
+                "-i",
+                stream_url,
+                "-vn",
+                "-ac",
+                "2",
+                "-ar",
+                str(sample_rate),
+                "-f",
+                "f32le",
+                "pipe:1",
+            ]
+        )
+        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE)
         if proc.stdout is None:
             raise RuntimeError("Kon ffmpeg stdout niet openen.")
-        while True:
-            raw = proc.stdout.read(bytes_per_block)
-            if not raw:
-                raise RuntimeError("Stream decoder stopte of gaf geen data meer.")
-            samples = np.frombuffer(raw, dtype="<f4")
-            frames = len(samples) // 2
-            if frames == 0:
-                continue
-            block = samples[: frames * 2].reshape(frames, 2).astype(np.float32, copy=False)
-            if len(block) < block_size:
-                pad = np.zeros((block_size - len(block), 2), dtype=np.float32)
-                block = np.vstack((block, pad))
-            yield as_float32_stereo(block)
-    finally:
-        proc.terminate()
+        try:
+            while True:
+                raw = proc.stdout.read(bytes_per_block)
+                if not raw:
+                    print("WBFM stream decoder stopte; herstart ffmpeg.", file=sys.stderr)
+                    break
+                samples = np.frombuffer(raw, dtype="<f4")
+                frames = len(samples) // 2
+                if frames == 0:
+                    if silence_on_stall:
+                        yield silence
+                    continue
+                block = samples[: frames * 2].reshape(frames, 2).astype(np.float32, copy=False)
+                if len(block) < block_size:
+                    pad = np.zeros((block_size - len(block), 2), dtype=np.float32)
+                    block = np.vstack((block, pad))
+                yield as_float32_stereo(block)
+        finally:
+            proc.terminate()
+            try:
+                proc.wait(timeout=2)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=2)
+        if silence_on_stall:
+            yield silence
+        time.sleep(reconnect_delay_s)
 
 
 def list_audio_devices() -> str:

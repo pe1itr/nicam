@@ -34,6 +34,9 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--input", help="WAV-bestand voor --source wav.")
     parser.add_argument("--device", help="Audio input device naam of index voor --source device.")
     parser.add_argument("--stream-url", help="Stream-URL voor --source stream.")
+    parser.add_argument("--no-stream-reconnect", action="store_true", help="Schakel ffmpeg reconnect/herstart uit.")
+    parser.add_argument("--no-stream-silence", action="store_true", help="Stop stilte-fallback bij stream-haperingen.")
+    parser.add_argument("--stream-reconnect-delay", type=float, help="Wachttijd in seconden vóór ffmpeg herstart.")
     parser.add_argument("--audio-gain", type=float, help="Audio gain vóór MPX-encoding, bijvoorbeeld 0.5.")
     parser.add_argument("--mpx-gain", type=float, help="Composite MPX drive vóór FM-modulatie, bijvoorbeeld 1.15.")
     parser.add_argument("--cyclic", action="store_true", help="Gebruik Pluto cyclic buffer. Alleen zinvol voor WAV.")
@@ -124,6 +127,12 @@ def apply_cli_overrides(config: dict, args: argparse.Namespace) -> dict:
         config["audio"]["device"] = args.device
     if args.stream_url:
         config["audio"]["stream_url"] = args.stream_url
+    if args.no_stream_reconnect:
+        config["audio"]["stream_reconnect"] = False
+    if args.no_stream_silence:
+        config["audio"]["stream_silence_on_stall"] = False
+    if args.stream_reconnect_delay is not None:
+        config["audio"]["stream_reconnect_delay_s"] = args.stream_reconnect_delay
     if args.audio_gain is not None:
         config["audio"]["gain"] = args.audio_gain
     if args.mpx_gain is not None:
@@ -152,7 +161,14 @@ def make_source(config: dict):
         stream_url = audio_cfg.get("stream_url")
         if not stream_url:
             raise ValueError("--stream-url is verplicht bij --source stream.")
-        return stream_blocks(str(stream_url), audio_rate, block_size)
+        return stream_blocks(
+            str(stream_url),
+            audio_rate,
+            block_size,
+            reconnect=bool(audio_cfg.get("stream_reconnect", True)),
+            silence_on_stall=bool(audio_cfg.get("stream_silence_on_stall", True)),
+            reconnect_delay_s=float(audio_cfg.get("stream_reconnect_delay_s", 2.0)),
+        )
     if source == "silence":
         return silence_blocks(block_size)
     raise ValueError(f"Onbekende audiobron: {source}")

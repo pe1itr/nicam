@@ -6,11 +6,26 @@ REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 export NICAM_ENV="${NICAM_ENV:-tim}"
 
+OVERRIDE_TX_FREQ_MHZ="${TX_FREQ_MHZ:-}"
+OVERRIDE_TX_GAIN_DB="${TX_GAIN_DB:-}"
+OVERRIDE_TX_SOURCE="${TX_SOURCE:-}"
+OVERRIDE_TX_STREAM_URL="${TX_STREAM_URL:-}"
+OVERRIDE_EXTRA_TX_ARGS="${EXTRA_TX_ARGS:-}"
+
 ENV_FILE="${NICAM_ENV_FILE:-${REPO_DIR}/config/environments/${NICAM_ENV}.env}"
 if [[ -f "${ENV_FILE}" ]]; then
   # shellcheck disable=SC1090
   source "${ENV_FILE}"
+else
+  echo "tim-wbfm-tx: env-bestand niet gevonden: ${ENV_FILE}" >&2
+  echo "tim-wbfm-tx: maak het aan met: cp config/environments/tim.env.example config/environments/tim.env" >&2
 fi
+
+if [[ -n "${OVERRIDE_TX_FREQ_MHZ}" ]]; then TX_FREQ_MHZ="${OVERRIDE_TX_FREQ_MHZ}"; fi
+if [[ -n "${OVERRIDE_TX_GAIN_DB}" ]]; then TX_GAIN_DB="${OVERRIDE_TX_GAIN_DB}"; fi
+if [[ -n "${OVERRIDE_TX_SOURCE}" ]]; then TX_SOURCE="${OVERRIDE_TX_SOURCE}"; fi
+if [[ -n "${OVERRIDE_TX_STREAM_URL}" ]]; then TX_STREAM_URL="${OVERRIDE_TX_STREAM_URL}"; fi
+if [[ -n "${OVERRIDE_EXTRA_TX_ARGS}" ]]; then EXTRA_TX_ARGS="${OVERRIDE_EXTRA_TX_ARGS}"; fi
 
 TX_FREQ_MHZ="${TX_FREQ_MHZ:-2324}"
 TX_GAIN_DB="${TX_GAIN_DB:--10}"
@@ -29,5 +44,7 @@ args=(
 if [[ "${TX_SOURCE}" == "stream" ]]; then
   args+=(--stream-url "${TX_STREAM_URL}")
 fi
+
+echo "tim-wbfm-tx: env=${ENV_FILE} freq=${TX_FREQ_MHZ} MHz gain=${TX_GAIN_DB} source=${TX_SOURCE}" >&2
 
 exec "${REPO_DIR}/tools/nicam-run" "${args[@]}" ${EXTRA_TX_ARGS} "$@"

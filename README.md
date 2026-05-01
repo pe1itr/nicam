@@ -234,6 +234,15 @@ tools/websdr-wbfm-rx --stereo-blend 0.35
 tools/websdr-wbfm-rx --stereo-blend 1.0
 ```
 
+De ontvanger heeft standaard pilot-squelch. Als de zender wegvalt en de 19 kHz
+pilot onvoldoende is, fade't de audio dicht:
+
+```sh
+tools/websdr-wbfm-rx --verbose
+tools/websdr-wbfm-rx --squelch-pilot 0.12
+tools/websdr-wbfm-rx --no-squelch
+```
+
 ## Machineprofielen en uniforme start
 
 Voor machines met verschillende Python-installaties en audio-uitgangen staat er
@@ -308,6 +317,15 @@ Tijdelijk overschrijven:
 ```sh
 TX_GAIN_DB=-15 tools/tim-wbfm-tx
 TX_FREQ_MHZ=2324 TX_STREAM_URL="https://icecast.omroep.nl/radio2-bb-aac" tools/tim-wbfm-tx
+```
+
+Bij korte internetstream-haperingen blijft de WBFM-zender standaard doorlopen:
+ffmpeg reconnect wordt gebruikt, de decoder wordt opnieuw gestart bij EOF, en
+er wordt tijdelijk stilte uitgezonden. Uitzetten kan met:
+
+```sh
+tools/tim-wbfm-tx --no-stream-silence
+tools/tim-wbfm-tx --no-stream-reconnect
 ```
 
 De lokale configuratie bevat een operatorprofiel voor een volledige

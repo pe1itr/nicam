@@ -188,6 +188,17 @@ class StereoMpxDecoder:
         self.diff_lpf = StreamingLowpass(mpx_rate, 15_000.0)
         self.deemphasis = StreamingDeemphasis(audio_rate, deemphasis_us)
 
+    def pilot_strength(self, mpx: np.ndarray) -> float:
+        data = np.asarray(mpx, dtype=np.float32)
+        if data.size == 0:
+            return 0.0
+        n = data.size
+        t = (np.arange(n, dtype=np.float64) + self.sample_index) / self.mpx_rate
+        carrier = np.exp(-2j * np.pi * self.pilot_hz * t)
+        pilot = 2.0 * abs(np.mean(data * carrier))
+        rms = float(np.sqrt(np.mean(data * data) + 1e-12))
+        return float(pilot / max(rms, 1e-6))
+
     def _pilot_phase(self, mpx: np.ndarray, t: np.ndarray) -> float:
         carrier = np.exp(-2j * np.pi * self.pilot_hz * t)
         estimate = np.mean(np.asarray(mpx, dtype=np.float32) * carrier)
@@ -218,6 +229,41 @@ class StereoMpxDecoder:
 
         audio = resample(stereo, self.mpx_rate, self.audio_rate)
         return np.clip(self.deemphasis.process(audio), -1.0, 1.0)
+
+
+class AudioSquelch:
+    def __init__(
+        self,
+        enabled: bool,
+        threshold: float,
+        hysteresis: float,
+        attack: float,
+        release: float,
+    ) -> None:
+        self.enabled = enabled
+        self.open_threshold = float(threshold)
+        self.close_threshold = max(0.0, float(threshold) - float(hysteresis))
+        self.attack = float(np.clip(attack, 0.0, 1.0))
+        self.release = float(np.clip(release, 0.0, 1.0))
+        self.open = False
+        self.gain = 0.0 if enabled else 1.0
+
+    def process(self, audio: np.ndarray, metric: float) -> tuple[np.ndarray, bool]:
+        data = np.asarray(audio, dtype=np.float32)
+        if not self.enabled:
+            return data, True
+        if self.open:
+            if metric < self.close_threshold:
+                self.open = False
+        elif metric >= self.open_threshold:
+            self.open = True
+
+        target = 1.0 if self.open else 0.0
+        step = self.attack if self.open else self.release
+        self.gain += (target - self.gain) * step
+        if self.gain < 1e-4:
+            self.gain = 0.0
+        return (data * self.gain).astype(np.float32, copy=False), self.open
 
 
 def resample(data: np.ndarray, src_rate: int, dst_rate: int) -> np.ndarray:
@@ -258,6 +304,13 @@ def run(args: argparse.Namespace) -> int:
         stereo=not args.mono,
         stereo_blend=args.stereo_blend,
     )
+    squelch = AudioSquelch(
+        enabled=not args.no_squelch,
+        threshold=args.squelch_pilot,
+        hysteresis=args.squelch_hysteresis,
+        attack=args.squelch_attack,
+        release=args.squelch_release,
+    )
     bytes_per_sample = 2 if args.iq_format == "rtl_u8" else 8
     read_size = args.block_samples * bytes_per_sample
     deadline = time.monotonic() + args.seconds if args.seconds is not None else None
@@ -278,8 +331,13 @@ def run(args: argparse.Namespace) -> int:
             sample_index += iq.size
             mpx_rf_rate = channel_lpf.process(discriminator.demod(iq))
             mpx = resample(mpx_rf_rate, args.sample_rate, args.mpx_rate)
+            pilot_metric = decoder.pilot_strength(mpx)
             audio = decoder.decode(mpx)
             if audio.size:
+                audio, squelch_open = squelch.process(audio, pilot_metric)
+                if args.verbose and chunks % args.squelch_report_chunks == 0:
+                    state = "open" if squelch_open else "closed"
+                    print(f"squelch={state} pilot_metric={pilot_metric:.3f}", file=sys.stderr)
                 try:
                     write_pcm(audio_out, audio, args.audio_gain, flush=chunks % args.flush_chunks == 0)
                 except BrokenPipeError:
@@ -336,6 +394,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--flush-chunks", type=int, default=4)
     parser.add_argument("--seconds", type=float)
     parser.add_argument("--mono", action="store_true", help="decode only L+R mono")
+    parser.add_argument("--no-squelch", action="store_true", help="disable pilot-based audio squelch")
+    parser.add_argument("--squelch-pilot", type=float, default=0.08, help="pilot metric needed to open squelch")
+    parser.add_argument("--squelch-hysteresis", type=float, default=0.02)
+    parser.add_argument("--squelch-attack", type=float, default=0.35)
+    parser.add_argument("--squelch-release", type=float, default=0.15)
+    parser.add_argument("--squelch-report-chunks", type=int, default=20)
+    parser.add_argument("--verbose", action="store_true")
     return parser.parse_args(argv)
 
 
