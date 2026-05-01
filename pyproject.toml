@@ -1,0 +1,17 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "nicam-direct-qpsk"
+version = "0.1.0"
+description = "Direct NICAM DQPSK experiments for PlutoSDR and RTL-SDR"
+requires-python = ">=3.10"
+dependencies = [
+  "numpy>=1.24",
+  "opuslib>=3.0.1",
+  "pyadi-iio>=0.0.16",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

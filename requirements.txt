@@ -1,0 +1,3 @@
+numpy>=1.24
+pyadi-iio>=0.0.16
+opuslib>=3.0.1
