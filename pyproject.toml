@@ -11,7 +11,20 @@ dependencies = [
   "numpy>=1.24",
   "opuslib>=3.0.1",
   "pyadi-iio>=0.0.16",
+  "PyYAML>=6.0",
+  "scipy>=1.10",
+  "soundfile>=0.12",
 ]
+
+[project.optional-dependencies]
+audio-device = [
+  "sounddevice>=0.4",
+]
+
+[project.scripts]
+nicam-stream-rx = "nicam.stream_rx:main"
+nicam-stream-tx = "nicam.stream_tx:main"
+wbfm-tx = "wbfm.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

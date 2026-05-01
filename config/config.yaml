@@ -1,0 +1,37 @@
+pluto:
+  uri: "ip:192.168.2.1"
+  tx_lo_hz: 2323700000
+  sample_rate_hz: 960000
+  rf_bandwidth_hz: 300000
+  tx_gain_db: -30
+  cyclic_buffer: false
+  buffer_size: 16384
+
+operator:
+  amateur_radio_license: "full"
+  amateur_bands_authorized: true
+  suppress_tx_warnings: true
+
+audio:
+  source: "wav"
+  input_file: "test_audio/voorbeeld.wav"
+  device: null
+  stream_url: null
+  gain: 1.0
+  audio_rate_hz: 48000
+  mpx_rate_hz: 240000
+  block_size: 4096
+
+fm:
+  deviation_hz: 75000
+  iq_level: 0.65
+
+mpx:
+  gain: 1.15
+  audio_lowpass_hz: 15000
+  preemphasis_us: 50
+  pilot_hz: 19000
+  pilot_level: 0.10
+  subcarrier_hz: 38000
+  sum_level: 0.9
+  diff_level: 0.9

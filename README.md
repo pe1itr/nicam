@@ -134,9 +134,63 @@ python -m nicam.stream_tx --tone --seconds 1 --out /tmp/nicam-tone.iq
 python -m nicam.pluto_tx --iq-in /tmp/nicam-tone.iq --lo 100000000 --tx-gain -40 --cyclic
 ```
 
-Let op: zend alleen op frequenties, vermogens en aansluitingen die toegestaan
-zijn. Voor labtests is een coaxverbinding met verzwakker tussen Pluto en RTL-SDR
-het veiligst.
+## WBFM-zender
+
+Naast de directe NICAM/QPSK-keten bevat het project ook een experimentele stereo
+WBFM-zender voor PlutoSDR. Deze maakt een FM-MPX-signaal met L+R, 19 kHz pilot
+en L-R DSB-subcarrier, moduleert dat naar complex baseband IQ en kan dit direct
+naar de Pluto sturen.
+
+De standaardinstellingen staan in `config/config.yaml`. Test eerst offline of de
+audio-naar-IQ-keten werkt:
+
+```sh
+PYTHONPATH=src python3 -m wbfm.main \
+  --config config/config.yaml \
+  --source wav \
+  --input test_audio/voorbeeld.wav \
+  --iq-out /tmp/wbfm.complex64 \
+  --seconds 2
+```
+
+Uitzenden via PlutoSDR:
+
+```sh
+PYTHONPATH=src python3 -m wbfm.main \
+  --config config/config.yaml \
+  --freq 2323.7 \
+  --gain -30 \
+  --source wav \
+  --input test_audio/voorbeeld.wav \
+  --cyclic
+```
+
+Na een editable install kun je ook `wbfm-tx` gebruiken in plaats van
+`python3 -m wbfm.main`.
+
+Belangrijke WBFM-opties:
+
+- `--freq`: Pluto TX LO in MHz
+- `--gain`: Pluto TX hardware gain in dB; begin laag
+- `--source`: `wav`, `stream`, `device` of `silence`
+- `--iq-out`: schrijf complex64 baseband IQ naar een bestand in plaats van TX
+- `--deviation`: FM-deviatie in Hz, standaard `75000`
+- `--preemphasis-us`: pre-emphasis, standaard `50`
+- `--pilot-level`: 19 kHz pilotniveau
+
+De lokale configuratie bevat een operatorprofiel voor een volledige
+amateurvergunning op de amateurbanden:
+
+```yaml
+operator:
+  amateur_radio_license: "full"
+  amateur_bands_authorized: true
+  suppress_tx_warnings: true
+```
+
+Met `suppress_tx_warnings: true` onderdrukt de WBFM-zender de generieke
+TX-gain-waarschuwing. Voor labtests blijft een coaxverbinding met verzwakker
+tussen Pluto en RTL-SDR het meest reproduceerbaar.
 
 ## RTL-SDR audio terugontvangen
 
