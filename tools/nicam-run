@@ -17,6 +17,11 @@ VENV_PATH="${VENV_PATH:-${REPO_DIR}/.venv}"
 AUDIO_BACKEND="${AUDIO_BACKEND:-stdout}"
 AUDIO_DEVICE="${AUDIO_DEVICE:-default}"
 
+if [[ "${PYTHON_MODE}" == "venv" && ! -x "${VENV_PATH}/bin/python" && -x "${REPO_DIR}/.venv/bin/python" ]]; then
+  echo "VENV_PATH ${VENV_PATH} niet gevonden; gebruik ${REPO_DIR}/.venv" >&2
+  VENV_PATH="${REPO_DIR}/.venv"
+fi
+
 if [[ "${PYTHON_MODE}" == "venv" ]]; then
   PYTHON_BIN="${VENV_PATH}/bin/python"
 elif [[ "${PYTHON_MODE}" == "user" ]]; then

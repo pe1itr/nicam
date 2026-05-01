@@ -252,7 +252,7 @@ De belangrijkste profielvelden:
 ```sh
 PYTHON_MODE=src        # src, user of venv
 PYTHON_BIN=python3
-VENV_PATH=/home/user/nicam-transmitter/.venv
+VENV_PATH=${REPO_DIR}/.venv
 AUDIO_BACKEND=aplay   # stdout, ffplay, aplay of none
 AUDIO_DEVICE=plughw:0,0
 NICAM_AUDIO_RATE=32000
