@@ -16,6 +16,7 @@ from .dqpsk import symbols_to_bits
 from .frame import FAW, descramble_frame, find_frame_offsets
 from .iq import u8_iq_to_complex
 from .pipe import suppress_stdout_broken_pipe
+from .qpsk_dsp import demap_symbols_to_bits
 from .rtlsdr_rx import DEFAULT_SAMPLE_RATE
 
 
@@ -172,10 +173,12 @@ def demod_symbols_to_bits(
     symbols: np.ndarray,
     previous_symbol: complex | np.complex64 | None,
     carrier_tracking: bool,
+    dsp_backend: str,
 ) -> tuple[np.ndarray, float]:
     if carrier_tracking:
         return symbols_to_bits_with_carrier_tracking(symbols, previous_symbol)
-    return symbols_to_bits(symbols, previous_symbol), 0.0
+    bits, _ = demap_symbols_to_bits(symbols, previous_symbol, dsp_backend)
+    return bits, 0.0
 
 
 class PhaseDemodState:
@@ -189,7 +192,12 @@ class PhaseDemodState:
         self.sample_index = 0
         self.previous_symbol: complex | np.complex64 | None = None
 
-    def demod(self, iq: np.ndarray, carrier_tracking: bool) -> tuple[np.ndarray, float]:
+    def demod(
+        self,
+        iq: np.ndarray,
+        carrier_tracking: bool,
+        dsp_backend: str,
+    ) -> tuple[np.ndarray, float]:
         raw = np.asarray(iq, dtype=np.complex64)
         data = np.concatenate([self.raw_tail, raw]) if self.raw_tail.size else raw
         if data.size == 0:
@@ -211,6 +219,7 @@ class PhaseDemodState:
             symbols.astype(np.complex64),
             self.previous_symbol,
             carrier_tracking=carrier_tracking,
+            dsp_backend=dsp_backend,
         )
         if symbols.size:
             self.previous_symbol = symbols[-1]
@@ -248,7 +257,12 @@ class FractionalDemodState:
         other.previous_symbol = self.previous_symbol
         return other
 
-    def demod(self, iq: np.ndarray, carrier_tracking: bool) -> tuple[np.ndarray, float]:
+    def demod(
+        self,
+        iq: np.ndarray,
+        carrier_tracking: bool,
+        dsp_backend: str,
+    ) -> tuple[np.ndarray, float]:
         new = np.asarray(iq, dtype=np.complex64)
         if new.size:
             self.raw = np.concatenate([self.raw, new]) if self.raw.size else new
@@ -281,6 +295,7 @@ class FractionalDemodState:
             samples.astype(np.complex64),
             self.previous_symbol,
             carrier_tracking=carrier_tracking,
+            dsp_backend=dsp_backend,
         )
         if samples.size:
             self.previous_symbol = samples[-1]
@@ -334,6 +349,7 @@ def score_candidate_stream(
         bits, _ = trial.demod(
             iq,
             carrier_tracking=not args.no_carrier_tracking,
+            dsp_backend=args.dsp_backend,
         )
         chunks.append(np.asarray(bits, dtype=np.uint8))
 
@@ -407,7 +423,11 @@ def run_stable(args: argparse.Namespace) -> int:
                 locks: list[tuple[int, int] | None] = []
                 stream_scores: list[tuple[int, int, int, object]] = []
                 for _phase, _ppm, state in phase_states:
-                    bits, _ = state.demod(iq, carrier_tracking=not args.no_carrier_tracking)
+                    bits, _ = state.demod(
+                        iq,
+                        carrier_tracking=not args.no_carrier_tracking,
+                        dsp_backend=args.dsp_backend,
+                    )
                     phase_bits.append(bits)
                     lock = select_payload_lock_offset(
                         bits,
@@ -472,7 +492,11 @@ def run_stable(args: argparse.Namespace) -> int:
                     )
             else:
                 assert active is not None
-                bits, carrier_step = active.demod(iq, carrier_tracking=not args.no_carrier_tracking)
+                bits, carrier_step = active.demod(
+                    iq,
+                    carrier_tracking=not args.no_carrier_tracking,
+                    dsp_backend=args.dsp_backend,
+                )
                 if args.verbose and abs(carrier_step) > 0.05:
                     carrier_hz = carrier_step * SYMBOL_RATE / (2 * np.pi)
                     print(f"carrier_step_hz={carrier_hz:.0f}", file=sys.stderr)
@@ -810,6 +834,7 @@ def run(args: argparse.Namespace) -> int:
                             symbols,
                             previous_symbols[phase],
                             carrier_tracking=not args.no_carrier_tracking,
+                            dsp_backend=args.dsp_backend,
                         )
                         for phase, symbols in enumerate(symbols_by_phase)
                     ]
@@ -882,6 +907,7 @@ def run(args: argparse.Namespace) -> int:
                             symbols,
                             previous_symbols[phase],
                             carrier_tracking=not args.no_carrier_tracking,
+                            dsp_backend=args.dsp_backend,
                         )
                         for phase, symbols in enumerate(symbols_by_phase)
                     ]
@@ -933,6 +959,7 @@ def run(args: argparse.Namespace) -> int:
                     symbols,
                     previous_symbols[phase],
                     carrier_tracking=not args.no_carrier_tracking,
+                    dsp_backend=args.dsp_backend,
                 )
                 if args.verbose and abs(carrier_step) > 0.05:
                     carrier_hz = carrier_step * SYMBOL_RATE / (2 * np.pi)
@@ -1110,6 +1137,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         type=float,
         default=1.0,
         help="seconds between RF stats prints (default: 1.0)",
+    )
+    parser.add_argument(
+        "--dsp-backend",
+        choices=["py", "c"],
+        default="py",
+        help="DSP backend for QPSK demapping",
     )
     parser.add_argument("--flush-frames", type=int, default=20)
     parser.add_argument("--no-carrier-tracking", action="store_true")
