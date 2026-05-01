@@ -5,7 +5,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_DIR="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 
 DEVICE_INDEX="${DEVICE_INDEX:-2}"
-FREQ_HZ="${FREQ_HZ:-2324000000}"
+FREQ_HZ="${FREQ_HZ:-436000000}"
 SAMPLE_RATE="${SAMPLE_RATE:-1456000}"
 PPM="${PPM:-0}"
 GAIN="${GAIN:-auto}"

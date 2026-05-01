@@ -285,6 +285,12 @@ systemctl --user daemon-reload
 systemctl --user enable --now nicam-rx.service
 ```
 
+Frequentie-instelling met converter:
+
+- RF doelfrequentie: `2324 MHz`
+- Externe converter LO: `1888 MHz`
+- RTL-SDR tuningfrequentie (IF): `436 MHz` (`2324 - 1888 = 436`)
+
 Status en logs:
 
 ```sh
@@ -292,7 +298,9 @@ systemctl --user status nicam-rx.service
 journalctl --user -u nicam-rx.service -f
 ```
 
-Standaard draait deze service met `rtl_sdr -d 2` op `2324000000` Hz.
+Standaard draait deze service met `rtl_sdr -d 2` op `436000000` Hz.
+Dit is bedoeld voor een externe converter met LO `1888 MHz` voor een doelfrequentie
+van `2324 MHz` (`2324 - 1888 = 436 MHz` IF).
 
 RF SNR-indicatie aanzetten (periodieke ontvangstmeting):
 

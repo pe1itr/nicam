@@ -1,5 +1,5 @@
 [Unit]
-Description=NICAM receiver via rtl_sdr (device 2, 2324 MHz)
+Description=NICAM receiver via rtl_sdr (device 2, 436 MHz IF)
 After=default.target
 
 [Service]
