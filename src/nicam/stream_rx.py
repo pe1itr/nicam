@@ -29,6 +29,8 @@ def open_iq_input(args: argparse.Namespace) -> tuple[BinaryIO, subprocess.Popen[
             )
         cmd = [
             "rtl_sdr",
+            "-d",
+            str(args.device_index),
             "-f",
             str(args.freq),
             "-s",
@@ -1073,6 +1075,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--iq-in", default="-", help="rtl_sdr-style uint8 IQ input, or - for stdin")
     parser.add_argument("--audio-out", default="-", help="PCM/WAV output, or - for stdout")
     parser.add_argument("--freq", type=int, help="start rtl_sdr at this RF center frequency in Hz")
+    parser.add_argument(
+        "--device-index",
+        type=int,
+        default=0,
+        help="rtl_sdr device index when --freq is used (default: 0)",
+    )
     parser.add_argument("--sample-rate", type=int, default=DEFAULT_SAMPLE_RATE)
     parser.add_argument("--ppm", type=int, default=0)
     parser.add_argument("--gain", default="auto")
