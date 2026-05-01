@@ -120,6 +120,26 @@ class StreamingLowpass:
         return filtered.astype(np.float32, copy=False)
 
 
+class StreamingBandpass:
+    def __init__(self, sample_rate: int, low_hz: float, high_hz: float, taps: int = 257) -> None:
+        nyquist = sample_rate / 2.0
+        low = max(float(low_hz), 1.0)
+        high = min(float(high_hz), nyquist * 0.95)
+        if low >= high:
+            raise ValueError("bandpass low_hz must be below high_hz")
+        self.taps = signal.firwin(taps, [low / nyquist, high / nyquist], pass_zero=False).astype(np.float64)
+        self.zi = np.zeros(len(self.taps) - 1, dtype=np.float64)
+
+    def process(self, data: np.ndarray) -> np.ndarray:
+        filtered, self.zi = signal.lfilter(
+            self.taps,
+            [1.0],
+            np.asarray(data, dtype=np.float32),
+            zi=self.zi,
+        )
+        return filtered.astype(np.float32, copy=False)
+
+
 class StreamingDeemphasis:
     def __init__(self, sample_rate: int, tau_us: float) -> None:
         self.enabled = tau_us > 0
@@ -153,6 +173,7 @@ class StereoMpxDecoder:
         diff_level: float = 0.9,
         deemphasis_us: float = 50.0,
         stereo: bool = True,
+        stereo_blend: float = 1.0,
     ) -> None:
         self.mpx_rate = int(mpx_rate)
         self.audio_rate = int(audio_rate)
@@ -160,8 +181,10 @@ class StereoMpxDecoder:
         self.sum_level = float(sum_level)
         self.diff_level = float(diff_level)
         self.stereo = bool(stereo)
+        self.stereo_blend = float(np.clip(stereo_blend, 0.0, 1.0))
         self.sample_index = 0
         self.mono_lpf = StreamingLowpass(mpx_rate, 15_000.0)
+        self.diff_bpf = StreamingBandpass(mpx_rate, 23_000.0, 53_000.0)
         self.diff_lpf = StreamingLowpass(mpx_rate, 15_000.0)
         self.deemphasis = StreamingDeemphasis(audio_rate, deemphasis_us)
 
@@ -182,10 +205,13 @@ class StereoMpxDecoder:
         self.sample_index += n
 
         mono = self.mono_lpf.process(data) / max(self.sum_level, 1e-6)
-        if self.stereo:
+        if self.stereo and self.stereo_blend > 0.0:
             phase = self._pilot_phase(data, t)
             subcarrier = np.sin(2.0 * (2.0 * np.pi * self.pilot_hz * t + phase))
-            diff = self.diff_lpf.process(2.0 * data * subcarrier) / max(self.diff_level, 1e-6)
+            stereo_subband = self.diff_bpf.process(data)
+            diff = self.diff_lpf.process(2.0 * stereo_subband * subcarrier) / max(self.diff_level, 1e-6)
+            if self.stereo_blend != 1.0:
+                diff = diff * self.stereo_blend
             stereo = np.column_stack((mono + diff, mono - diff))
         else:
             stereo = np.column_stack((mono, mono))
@@ -230,6 +256,7 @@ def run(args: argparse.Namespace) -> int:
         diff_level=args.diff_level,
         deemphasis_us=args.deemphasis_us,
         stereo=not args.mono,
+        stereo_blend=args.stereo_blend,
     )
     bytes_per_sample = 2 if args.iq_format == "rtl_u8" else 8
     read_size = args.block_samples * bytes_per_sample
@@ -296,7 +323,13 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--pilot-hz", type=float, default=19_000.0)
     parser.add_argument("--sum-level", type=float, default=0.9)
     parser.add_argument("--diff-level", type=float, default=0.9)
-    parser.add_argument("--channel-bandwidth", type=float, default=120_000.0)
+    parser.add_argument(
+        "--stereo-blend",
+        type=float,
+        default=0.65,
+        help="L-R stereo amount, 0.0 is mono and 1.0 is full stereo (default: 0.65)",
+    )
+    parser.add_argument("--channel-bandwidth", type=float, default=100_000.0)
     parser.add_argument("--freq-offset", type=float, default=0.0, help="baseband correction in Hz")
     parser.add_argument("--audio-gain", type=float, default=0.8)
     parser.add_argument("--block-samples", type=int, default=65_536)

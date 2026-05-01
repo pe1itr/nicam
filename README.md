@@ -182,6 +182,8 @@ Belangrijke WBFM-opties:
 
 De RTL-SDR WBFM-ontvanger decodeert standaard stereo broadcast-FM: FM
 discriminator, 19 kHz pilot, L-R subcarrier, 50 us de-emphasis en stereo PCM.
+De stereo-decoder gebruikt standaard gedeeltelijke stereo-blend om L-R-ruis te
+beperken.
 
 Naar WAV opnemen:
 
@@ -218,6 +220,19 @@ PYTHONPATH=src python3 -m wbfm.rtl_rx \
 
 Na een editable install kun je ook `wbfm-rx` gebruiken in plaats van
 `python3 -m wbfm.rtl_rx`.
+
+Bij ruis eerst mono vergelijken:
+
+```sh
+tools/websdr-wbfm-rx --mono
+```
+
+Daarna stereo-blend instellen. Lager is rustiger, hoger is breder stereo:
+
+```sh
+tools/websdr-wbfm-rx --stereo-blend 0.35
+tools/websdr-wbfm-rx --stereo-blend 1.0
+```
 
 ## Machineprofielen en uniforme start
 

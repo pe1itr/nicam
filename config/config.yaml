@@ -40,6 +40,7 @@ rtl_wbfm_rx:
   sample_rate_hz: 960000
   mpx_rate_hz: 240000
   audio_rate_hz: 48000
-  channel_bandwidth_hz: 120000
+  channel_bandwidth_hz: 100000
   deviation_hz: 75000
   deemphasis_us: 50
+  stereo_blend: 0.65
