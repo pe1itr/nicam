@@ -230,7 +230,7 @@ Profielkeuze:
 
 ```sh
 tools/nicam-run wbfm-rx ...
-NICAM_ENV=odroid tools/nicam-run nicam-rx ...
+NICAM_ENV=websdr tools/nicam-run nicam-rx ...
 NICAM_ENV_FILE=/opt/nicam/local.env tools/nicam-run wbfm-tx ...
 ```
 
@@ -242,6 +242,7 @@ config/environments/$(hostname -s).env
 
 Voorbeeldprofielen staan in:
 
+- `config/environments/websdr.env.example`
 - `config/environments/odroid.env.example`
 - `config/environments/desktop.env.example`
 - `config/environments/user-install.env.example`
@@ -264,6 +265,34 @@ Voorbeelden:
 tools/nicam-run nicam-rx --device-index 1 --freq 435970000 --gain 29.7
 tools/nicam-run wbfm-rx --device-index 1 --freq 100700000 --gain 29.7
 tools/nicam-run wbfm-tx --config config/config.yaml --source stream --stream-url "https://icecast.omroep.nl/radio2-bb-aac"
+```
+
+WebSDR/Odroid WBFM shortcut, met `config/environments/websdr.env` en standaard
+`436000000` Hz:
+
+```sh
+tools/websdr-wbfm-rx
+```
+
+Tijdelijk overschrijven:
+
+```sh
+GAIN=29.7 FREQ_HZ=436000000 tools/websdr-wbfm-rx
+tools/websdr-wbfm-rx --mono
+```
+
+Tim WBFM-zender shortcut, met `.venv` en standaard `2324 MHz`:
+
+```sh
+cp config/environments/tim.env.example config/environments/tim.env
+tools/tim-wbfm-tx
+```
+
+Tijdelijk overschrijven:
+
+```sh
+TX_GAIN_DB=-15 tools/tim-wbfm-tx
+TX_FREQ_MHZ=2324 TX_STREAM_URL="https://icecast.omroep.nl/radio2-bb-aac" tools/tim-wbfm-tx
 ```
 
 De lokale configuratie bevat een operatorprofiel voor een volledige
