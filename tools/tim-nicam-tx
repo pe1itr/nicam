@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+export NICAM_ENV="${NICAM_ENV:-tim}"
+
+ENV_FILE="${NICAM_ENV_FILE:-${REPO_DIR}/config/environments/${NICAM_ENV}.env}"
+if [[ -f "${ENV_FILE}" ]]; then
+  # shellcheck disable=SC1090
+  source "${ENV_FILE}"
+else
+  echo "tim-nicam-tx: env-bestand niet gevonden: ${ENV_FILE}" >&2
+fi
+
+NICAM_TX_LO_HZ="${NICAM_TX_LO_HZ:-2324000000}"
+NICAM_TX_GAIN_DB="${NICAM_TX_GAIN_DB:--10}"
+NICAM_TX_SAMPLE_RATE="${NICAM_TX_SAMPLE_RATE:-1456000}"
+NICAM_TX_RF_BANDWIDTH="${NICAM_TX_RF_BANDWIDTH:-750000}"
+NICAM_TX_AMPLITUDE="${NICAM_TX_AMPLITUDE:-0.8}"
+NICAM_TX_SOURCE="${NICAM_TX_SOURCE:-stream}"
+NICAM_TX_STREAM_URL="${NICAM_TX_STREAM_URL:-https://icecast.omroep.nl/radio2-bb-aac}"
+NICAM_TX_AUDIO_FILE="${NICAM_TX_AUDIO_FILE:-}"
+NICAM_TX_EXTRA_ARGS="${NICAM_TX_EXTRA_ARGS:-}"
+NICAM_PLUTO_EXTRA_ARGS="${NICAM_PLUTO_EXTRA_ARGS:-}"
+
+tx_args=(
+  module
+  nicam.stream_tx
+  --sample-rate "${NICAM_TX_SAMPLE_RATE}"
+  --ffmpeg-reconnect
+)
+
+case "${NICAM_TX_SOURCE}" in
+  stream)
+    tx_args+=(--stream-url "${NICAM_TX_STREAM_URL}")
+    ;;
+  file)
+    if [[ -z "${NICAM_TX_AUDIO_FILE}" ]]; then
+      echo "tim-nicam-tx: NICAM_TX_AUDIO_FILE is verplicht bij NICAM_TX_SOURCE=file" >&2
+      exit 2
+    fi
+    tx_args+=(--audio-file "${NICAM_TX_AUDIO_FILE}")
+    ;;
+  tone)
+    tx_args+=(--tone)
+    ;;
+  *)
+    echo "tim-nicam-tx: onbekende NICAM_TX_SOURCE=${NICAM_TX_SOURCE}" >&2
+    exit 2
+    ;;
+esac
+
+echo "tim-nicam-tx: env=${ENV_FILE} lo=${NICAM_TX_LO_HZ} Hz gain=${NICAM_TX_GAIN_DB} source=${NICAM_TX_SOURCE}" >&2
+
+"${REPO_DIR}/tools/nicam-run" "${tx_args[@]}" ${NICAM_TX_EXTRA_ARGS} "$@" \
+  | "${REPO_DIR}/tools/nicam-run" module nicam.pluto_tx \
+      --lo "${NICAM_TX_LO_HZ}" \
+      --sample-rate "${NICAM_TX_SAMPLE_RATE}" \
+      --tx-gain "${NICAM_TX_GAIN_DB}" \
+      --rf-bandwidth "${NICAM_TX_RF_BANDWIDTH}" \
+      --amplitude "${NICAM_TX_AMPLITUDE}" \
+      ${NICAM_PLUTO_EXTRA_ARGS}

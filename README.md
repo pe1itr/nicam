@@ -328,6 +328,23 @@ tools/tim-wbfm-tx --no-stream-silence
 tools/tim-wbfm-tx --no-stream-reconnect
 ```
 
+NICAM shortcuts:
+
+```sh
+tools/tim-nicam-tx
+tools/websdr-nicam-rx
+```
+
+De NICAM zender op `tim` gebruikt standaard `2324 MHz` en de NICAM ontvanger op
+`websdr` gebruikt standaard `436 MHz` IF. Tijdelijk overschrijven:
+
+```sh
+NICAM_TX_GAIN_DB=-8 tools/tim-nicam-tx
+NICAM_TX_SOURCE=tone tools/tim-nicam-tx
+NICAM_RX_GAIN=29.7 tools/websdr-nicam-rx
+NICAM_RX_FREQ_OFFSET=-2900 tools/websdr-nicam-rx
+```
+
 De lokale configuratie bevat een operatorprofiel voor een volledige
 amateurvergunning op de amateurbanden:
 

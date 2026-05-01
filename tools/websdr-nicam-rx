@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+export NICAM_ENV="${NICAM_ENV:-websdr}"
+
+ENV_FILE="${NICAM_ENV_FILE:-${REPO_DIR}/config/environments/${NICAM_ENV}.env}"
+if [[ -f "${ENV_FILE}" ]]; then
+  # shellcheck disable=SC1090
+  source "${ENV_FILE}"
+else
+  echo "websdr-nicam-rx: env-bestand niet gevonden: ${ENV_FILE}" >&2
+fi
+
+DEVICE_INDEX="${NICAM_RX_DEVICE_INDEX:-${DEVICE_INDEX:-1}}"
+FREQ_HZ="${NICAM_RX_FREQ_HZ:-436000000}"
+SAMPLE_RATE="${NICAM_RX_SAMPLE_RATE:-1456000}"
+PPM="${NICAM_RX_PPM:-0}"
+GAIN="${NICAM_RX_GAIN:-auto}"
+FREQ_OFFSET="${NICAM_RX_FREQ_OFFSET:-0}"
+NICAM_RX_EXTRA_ARGS="${NICAM_RX_EXTRA_ARGS:-}"
+
+echo "websdr-nicam-rx: freq=${FREQ_HZ} Hz sample_rate=${SAMPLE_RATE} gain=${GAIN}" >&2
+
+exec "${REPO_DIR}/tools/nicam-run" nicam-rx \
+  --device-index "${DEVICE_INDEX}" \
+  --freq "${FREQ_HZ}" \
+  --sample-rate "${SAMPLE_RATE}" \
+  --ppm "${PPM}" \
+  --gain "${GAIN}" \
+  --freq-offset "${FREQ_OFFSET}" \
+  --dsp-backend c \
+  --stable-demod \
+  --fractional-timing \
+  --conceal-bad-frames \
+  ${NICAM_RX_EXTRA_ARGS} \
+  "$@"
