@@ -51,6 +51,7 @@ Thumbs.db
 # Local env files
 .env
 .env.*
+config/environments/*.env
 
 # Project-specific artifacts
 *.iq
