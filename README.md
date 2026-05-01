@@ -23,6 +23,17 @@ symbool. Dat houdt de timing in deze experimentele versie eenvoudig.
 
 ## Installatie
 
+Kies de methode die past bij de target machine.
+
+Optie A: user-installatie (zonder venv):
+
+```sh
+python3 -m pip install --user -r requirements.txt
+python3 -m pip install --user -e .
+```
+
+Optie B: virtual environment (`venv`):
+
 ```sh
 python3 -m venv .venv
 . .venv/bin/activate
@@ -33,6 +44,10 @@ pip install -e .
 Daarnaast moet de `rtl_sdr` command line tool beschikbaar zijn, bijvoorbeeld uit
 het pakket `rtl-sdr`. Voor `--stream-url` en `--audio-file` is ook `ffmpeg`
 nodig.
+
+Voor systemd user-services is het aan te raden overal `python3` te gebruiken,
+zodat je niet afhankelijk bent van een eventuele andere `python` default op het
+systeem.
 
 ## Ontvanger starten
 
