@@ -176,6 +176,8 @@ typedef struct {
 typedef struct {
     unsigned counts[8][95];
     char displayed[9];
+    int last_pos;
+    unsigned seen_mask;
 } StationIdState;
 
 static uint8_t scramble[BODY_BITS];
@@ -1265,6 +1267,7 @@ static void station_id_init(StationIdState *state) {
     memset(state, 0, sizeof(*state));
     memcpy(state->displayed, "        ", 8);
     state->displayed[8] = '\0';
+    state->last_pos = -1;
 }
 
 static void station_id_update(StationIdState *state, const uint8_t ctrl16[16]) {
@@ -1275,6 +1278,11 @@ static void station_id_update(StationIdState *state, const uint8_t ctrl16[16]) {
     }
     if (pos < 0 || pos >= 8 || ch < 32 || ch > 126) {
         return;
+    }
+    int completed_cycle = state->last_pos == 7 && pos == 0 && state->seen_mask == 0xffU;
+    if (pos != state->last_pos) {
+        state->last_pos = pos;
+        state->seen_mask |= 1U << pos;
     }
 
     unsigned *bucket = state->counts[pos];
@@ -1298,6 +1306,9 @@ static void station_id_update(StationIdState *state, const uint8_t ctrl16[16]) {
         }
     }
     if (best_count < 3 || state->displayed[pos] == (char)best_ch) {
+        if (completed_cycle) {
+            fprintf(stderr, "station_id=%s\n", state->displayed);
+        }
         return;
     }
 
