@@ -19,12 +19,25 @@ NICAM_TX_GAIN_DB="${NICAM_TX_GAIN_DB:--10}"
 NICAM_TX_SAMPLE_RATE="${NICAM_TX_SAMPLE_RATE:-1456000}"
 NICAM_TX_RF_BANDWIDTH="${NICAM_TX_RF_BANDWIDTH:-750000}"
 NICAM_TX_AMPLITUDE="${NICAM_TX_AMPLITUDE:-0.8}"
+NICAM_TX_BASEBAND_AMPLITUDE="${NICAM_TX_BASEBAND_AMPLITUDE:-}"
+NICAM_TX_RF_LEVEL="${NICAM_TX_RF_LEVEL:-200}"
+NICAM_TX_LEVEL_DB="${NICAM_TX_LEVEL_DB:-}"
 NICAM_TX_SOURCE="${NICAM_TX_SOURCE:-stream}"
 NICAM_TX_STREAM_URL="${NICAM_TX_STREAM_URL:-https://icecast.omroep.nl/radio2-bb-aac}"
 NICAM_TX_AUDIO_FILE="${NICAM_TX_AUDIO_FILE:-}"
+NICAM_TX_AUDIO_DEVICE="${NICAM_TX_AUDIO_DEVICE:-}"
+NICAM_TX_UDP_URL="${NICAM_TX_UDP_URL:-udp://0.0.0.0:7355}"
+NICAM_TX_PULSE_SHAPE="${NICAM_TX_PULSE_SHAPE:-1}"
+NICAM_TX_PULSE_ROLLOFF="${NICAM_TX_PULSE_ROLLOFF:-0.4}"
+NICAM_TX_PULSE_SPAN_SYMBOLS="${NICAM_TX_PULSE_SPAN_SYMBOLS:-6}"
+NICAM_TX_BASEBAND_FILTER="${NICAM_TX_BASEBAND_FILTER:-0}"
+NICAM_TX_BASEBAND_FILTER_CUTOFF="${NICAM_TX_BASEBAND_FILTER_CUTOFF:-425000}"
+NICAM_TX_BASEBAND_FILTER_TAPS="${NICAM_TX_BASEBAND_FILTER_TAPS:-49}"
 NICAM_TX_STATION_ID="${NICAM_TX_STATION_ID:-}"
 NICAM_TX_EXTRA_ARGS="${NICAM_TX_EXTRA_ARGS:-}"
 NICAM_PLUTO_EXTRA_ARGS="${NICAM_PLUTO_EXTRA_ARGS:-}"
+NICAM_TX_DIRECT="${NICAM_TX_DIRECT:-0}"
+NICAM_DIRECT_EXTRA_ARGS="${NICAM_DIRECT_EXTRA_ARGS:-}"
 
 tx_args=(
   module
@@ -32,6 +45,30 @@ tx_args=(
   --sample-rate "${NICAM_TX_SAMPLE_RATE}"
   --ffmpeg-reconnect
 )
+
+if [[ "${NICAM_TX_PULSE_SHAPE}" != "0" ]]; then
+  tx_args+=(
+    --pulse-shape
+    --pulse-rolloff "${NICAM_TX_PULSE_ROLLOFF}"
+    --pulse-span-symbols "${NICAM_TX_PULSE_SPAN_SYMBOLS}"
+  )
+fi
+
+if [[ "${NICAM_TX_BASEBAND_FILTER}" != "0" ]]; then
+  tx_args+=(
+    --baseband-filter
+    --baseband-filter-cutoff "${NICAM_TX_BASEBAND_FILTER_CUTOFF}"
+    --baseband-filter-taps "${NICAM_TX_BASEBAND_FILTER_TAPS}"
+  )
+fi
+
+if [[ -n "${NICAM_TX_BASEBAND_AMPLITUDE}" ]]; then
+  tx_args+=(--amplitude "${NICAM_TX_BASEBAND_AMPLITUDE}")
+elif [[ -n "${NICAM_TX_LEVEL_DB}" ]]; then
+  tx_args+=(--nicam-level-db "${NICAM_TX_LEVEL_DB}")
+else
+  tx_args+=(--nicam-rf-level "${NICAM_TX_RF_LEVEL}")
+fi
 
 if [[ -n "${NICAM_TX_STATION_ID}" ]]; then
   tx_args+=(--station-id "${NICAM_TX_STATION_ID}")
@@ -48,6 +85,19 @@ case "${NICAM_TX_SOURCE}" in
     fi
     tx_args+=(--audio-file "${NICAM_TX_AUDIO_FILE}")
     ;;
+  device)
+    if [[ -n "${NICAM_TX_AUDIO_DEVICE}" ]]; then
+      tx_args+=(--audio-device "${NICAM_TX_AUDIO_DEVICE}")
+    else
+      tx_args+=(--audio-device default)
+    fi
+    ;;
+  udp)
+    tx_args+=(--udp-url "${NICAM_TX_UDP_URL}")
+    ;;
+  silence)
+    tx_args+=(--silence)
+    ;;
   tone)
     tx_args+=(--tone)
     ;;
@@ -57,7 +107,20 @@ case "${NICAM_TX_SOURCE}" in
     ;;
 esac
 
-echo "tim-nicam-tx: env=${ENV_FILE} lo=${NICAM_TX_LO_HZ} Hz gain=${NICAM_TX_GAIN_DB} source=${NICAM_TX_SOURCE}" >&2
+echo "tim-nicam-tx: env=${ENV_FILE} lo=${NICAM_TX_LO_HZ} Hz gain=${NICAM_TX_GAIN_DB} source=${NICAM_TX_SOURCE} rf_level=${NICAM_TX_RF_LEVEL}" >&2
+
+if [[ "${NICAM_TX_DIRECT}" != "0" ]]; then
+  direct_args=(
+    module
+    nicam.pluto_stream_tx
+    "${tx_args[@]:2}"
+    --lo "${NICAM_TX_LO_HZ}"
+    --tx-gain "${NICAM_TX_GAIN_DB}"
+    --rf-bandwidth "${NICAM_TX_RF_BANDWIDTH}"
+    --pluto-amplitude "${NICAM_TX_AMPLITUDE}"
+  )
+  exec "${REPO_DIR}/tools/nicam-run" "${direct_args[@]}" ${NICAM_TX_EXTRA_ARGS} ${NICAM_DIRECT_EXTRA_ARGS} "$@"
+fi
 
 "${REPO_DIR}/tools/nicam-run" "${tx_args[@]}" ${NICAM_TX_EXTRA_ARGS} "$@" \
   | "${REPO_DIR}/tools/nicam-run" module nicam.pluto_tx \
