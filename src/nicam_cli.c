@@ -1656,10 +1656,6 @@ static int descramble_payload_phase(const uint8_t *frame, uint8_t payload[PAYLOA
     return 0;
 }
 
-static int descramble_payload(const uint8_t *frame, uint8_t payload[PAYLOAD_BITS]) {
-    return descramble_payload_phase(frame, payload, 16);
-}
-
 static void descramble_serial_body_variant(const uint8_t *body, uint8_t *out, int variant);
 
 static int descramble_body_phase(const uint8_t *frame, uint8_t body[BODY_BITS], int scramble_phase) {
@@ -1941,23 +1937,6 @@ static PatternScan scan_pattern(const uint8_t *bits, size_t len, const uint8_t p
         }
     }
     return scan;
-}
-
-static void apply_descramble_stream(const uint8_t *bits, size_t len, size_t offset, uint8_t *out, size_t *out_len) {
-    *out_len = 0;
-    if (len < offset + FRAME_BITS) {
-        return;
-    }
-    size_t frames = (len - offset) / FRAME_BITS;
-    for (size_t frame = 0; frame < frames; frame++) {
-        size_t pos = offset + frame * FRAME_BITS;
-        for (int i = 0; i < 24; i++) {
-            out[(*out_len)++] = bits[pos + (size_t)i];
-        }
-        for (int i = 0; i < PAYLOAD_BITS; i++) {
-            out[(*out_len)++] = bits[pos + 24 + (size_t)i] ^ scramble[16 + i];
-        }
-    }
 }
 
 static int payload_parity_errors_at(const uint8_t *bits, size_t len, size_t offset, size_t *frames_checked) {
