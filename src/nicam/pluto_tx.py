@@ -89,6 +89,10 @@ def stream_noncyclic_u8_iq_to_pluto(
     buffers: "queue.Queue[np.ndarray | None]" = queue.Queue(maxsize=args.queue_buffers)
     stop_event = threading.Event()
     stats = {"input_buffers": 0, "tx_buffers": 0, "underruns": 0}
+    buffer_duration_ms = 1000.0 * float(args.buffer_samples) / float(args.sample_rate)
+    underrun_timeout_s = args.underrun_timeout_ms / 1000.0
+    if underrun_timeout_s <= 0.0:
+        underrun_timeout_s = max(0.05, buffer_duration_ms * 1.5 / 1000.0)
 
     def producer() -> None:
         try:
@@ -128,7 +132,7 @@ def stream_noncyclic_u8_iq_to_pluto(
 
         while True:
             try:
-                item = buffers.get(timeout=args.underrun_timeout_ms / 1000.0)
+                item = buffers.get(timeout=underrun_timeout_s)
             except queue.Empty:
                 if last_buffer is None or not args.repeat_on_underrun:
                     continue
@@ -153,7 +157,8 @@ def stream_noncyclic_u8_iq_to_pluto(
                     f"input_buffers={stats['input_buffers']} "
                     f"tx_buffers={stats['tx_buffers']} "
                     f"queue={buffers.qsize()} "
-                    f"underruns={stats['underruns']}",
+                    f"underruns={stats['underruns']} "
+                    f"timeout_ms={underrun_timeout_s * 1000.0:.0f}",
                     file=sys.stderr,
                 )
                 next_report = time.monotonic() + args.status_interval
@@ -246,8 +251,8 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--underrun-timeout-ms",
         type=int,
-        default=20,
-        help="wait this long for input before repeating the last TX buffer",
+        default=0,
+        help="wait this long for input before repeating the last TX buffer; 0 derives it from --buffer-samples",
     )
     parser.add_argument(
         "--no-repeat-on-underrun",
