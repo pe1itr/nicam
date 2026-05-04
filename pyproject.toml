@@ -9,7 +9,6 @@ description = "Direct NICAM DQPSK experiments for PlutoSDR and RTL-SDR"
 requires-python = ">=3.8"
 dependencies = [
   "numpy>=1.24",
-  "opuslib>=3.0.1",
   "pyadi-iio>=0.0.16",
   "PyYAML>=6.0",
   "scipy>=1.10",

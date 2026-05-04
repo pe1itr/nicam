@@ -1,6 +1,5 @@
 numpy>=1.24
 pyadi-iio>=0.0.16
-opuslib>=3.0.1
 PyYAML>=6.0
 scipy>=1.10
 soundfile>=0.12

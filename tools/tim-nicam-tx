@@ -38,6 +38,7 @@ NICAM_TX_EXTRA_ARGS="${NICAM_TX_EXTRA_ARGS:-}"
 NICAM_PLUTO_EXTRA_ARGS="${NICAM_PLUTO_EXTRA_ARGS:-}"
 NICAM_TX_DIRECT="${NICAM_TX_DIRECT:-0}"
 NICAM_DIRECT_EXTRA_ARGS="${NICAM_DIRECT_EXTRA_ARGS:-}"
+NICAM_TX_BACKEND="${NICAM_TX_BACKEND:-pyadi}"
 
 tx_args=(
   module
@@ -120,6 +121,22 @@ if [[ "${NICAM_TX_DIRECT}" != "0" ]]; then
     --pluto-amplitude "${NICAM_TX_AMPLITUDE}"
   )
   exec "${REPO_DIR}/tools/nicam-run" "${direct_args[@]}" ${NICAM_TX_EXTRA_ARGS} ${NICAM_DIRECT_EXTRA_ARGS} "$@"
+fi
+
+if [[ "${NICAM_TX_BACKEND}" == "c-iio" ]]; then
+  if [[ ! -x "${REPO_DIR}/nicam-pluto-u8-tx" ]]; then
+    echo "tim-nicam-tx: bouw eerst ${REPO_DIR}/nicam-pluto-u8-tx met tools/build-nicam-pluto-u8-tx" >&2
+    exit 2
+  fi
+  "${REPO_DIR}/tools/nicam-run" "${tx_args[@]}" ${NICAM_TX_EXTRA_ARGS} "$@" \
+    | "${REPO_DIR}/nicam-pluto-u8-tx" \
+        --lo "${NICAM_TX_LO_HZ}" \
+        --sample-rate "${NICAM_TX_SAMPLE_RATE}" \
+        --tx-gain "${NICAM_TX_GAIN_DB}" \
+        --rf-bandwidth "${NICAM_TX_RF_BANDWIDTH}" \
+        --amplitude "${NICAM_TX_AMPLITUDE}" \
+        ${NICAM_PLUTO_EXTRA_ARGS}
+  exit $?
 fi
 
 "${REPO_DIR}/tools/nicam-run" "${tx_args[@]}" ${NICAM_TX_EXTRA_ARGS} "$@" \
