@@ -57,3 +57,4 @@ config/environments/*.env
 *.iq
 /nicam
 /nicam-pluto-u8-tx
+/nicam-pluto-tx

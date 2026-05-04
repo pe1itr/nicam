@@ -139,6 +139,55 @@ if [[ "${NICAM_TX_BACKEND}" == "c-iio" ]]; then
   exit $?
 fi
 
+if [[ "${NICAM_TX_BACKEND}" == "c-native" ]]; then
+  if [[ ! -x "${REPO_DIR}/nicam-pluto-tx" ]]; then
+    echo "tim-nicam-tx: bouw eerst ${REPO_DIR}/nicam-pluto-tx met tools/build-nicam-pluto-tx" >&2
+    exit 2
+  fi
+
+  native_args=(
+    --lo "${NICAM_TX_LO_HZ}"
+    --sample-rate "${NICAM_TX_SAMPLE_RATE}"
+    --tx-gain "${NICAM_TX_GAIN_DB}"
+    --rf-bandwidth "${NICAM_TX_RF_BANDWIDTH}"
+    --tx-amplitude "${NICAM_TX_AMPLITUDE}"
+    --nicam-rf-level "${NICAM_TX_RF_LEVEL}"
+  )
+  if [[ -n "${NICAM_TX_STATION_ID}" ]]; then
+    native_args+=(--station-id "${NICAM_TX_STATION_ID}")
+  fi
+
+  case "${NICAM_TX_SOURCE}" in
+    tone)
+      exec "${REPO_DIR}/nicam-pluto-tx" "${native_args[@]}" --source tone ${NICAM_PLUTO_EXTRA_ARGS} "$@"
+      ;;
+    silence)
+      exec "${REPO_DIR}/nicam-pluto-tx" "${native_args[@]}" --source silence ${NICAM_PLUTO_EXTRA_ARGS} "$@"
+      ;;
+    stream)
+      ffmpeg_args=(-hide_banner -loglevel error -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5)
+      ffmpeg_args+=(-i "${NICAM_TX_STREAM_URL}" -vn -f s16le -ac 2 -ar 32000 -)
+      ffmpeg "${ffmpeg_args[@]}" \
+        | "${REPO_DIR}/nicam-pluto-tx" "${native_args[@]}" --source pcm --pcm-in - ${NICAM_PLUTO_EXTRA_ARGS} "$@"
+      exit $?
+      ;;
+    file)
+      if [[ -z "${NICAM_TX_AUDIO_FILE}" ]]; then
+        echo "tim-nicam-tx: NICAM_TX_AUDIO_FILE is verplicht bij NICAM_TX_SOURCE=file" >&2
+        exit 2
+      fi
+      ffmpeg_args=(-hide_banner -loglevel error -i "${NICAM_TX_AUDIO_FILE}" -vn -f s16le -ac 2 -ar 32000 -)
+      ffmpeg "${ffmpeg_args[@]}" \
+        | "${REPO_DIR}/nicam-pluto-tx" "${native_args[@]}" --source pcm --pcm-in - ${NICAM_PLUTO_EXTRA_ARGS} "$@"
+      exit $?
+      ;;
+    *)
+      echo "tim-nicam-tx: NICAM_TX_BACKEND=c-native ondersteunt nu tone, silence, stream en file" >&2
+      exit 2
+      ;;
+  esac
+fi
+
 "${REPO_DIR}/tools/nicam-run" "${tx_args[@]}" ${NICAM_TX_EXTRA_ARGS} "$@" \
   | "${REPO_DIR}/tools/nicam-run" module nicam.pluto_tx \
       --lo "${NICAM_TX_LO_HZ}" \

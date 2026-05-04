@@ -1,0 +1,13 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
+
+cc="${CC:-gcc}"
+"${cc}" -O3 -Wall -Wextra -std=c11 \
+  "${REPO_DIR}/src/nicam_pluto_tx.c" \
+  -liio -lm \
+  -o "${REPO_DIR}/nicam-pluto-tx"
+
+echo "${REPO_DIR}/nicam-pluto-tx"
