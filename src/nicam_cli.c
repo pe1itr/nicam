@@ -20,6 +20,10 @@
 #define BITBUF_CAP (FRAME_BITS * 96)
 #define LEGACY_SCRAMBLE_PHASE 9
 
+#ifndef NICAM_ENABLE_LEGACY_DEMOD
+#define NICAM_ENABLE_LEGACY_DEMOD 0
+#endif
+
 static const uint8_t FAW[8] = {0, 1, 0, 0, 1, 1, 1, 0};
 
 typedef struct {
@@ -72,10 +76,12 @@ typedef struct {
     size_t len;
 } BitBuffer;
 
+#if NICAM_ENABLE_LEGACY_DEMOD
 typedef struct {
     int have_prev;
     complexd prev;
 } DemodState;
+#endif
 
 typedef struct {
     int phase;
@@ -85,7 +91,9 @@ typedef struct {
     int rotation;
     int swap_bits;
     BitBuffer bits;
+#if NICAM_ENABLE_LEGACY_DEMOD
     DemodState demod;
+#endif
 } HypothesisState;
 
 typedef struct {
@@ -127,12 +135,14 @@ typedef struct {
     ssize_t best_offset;
 } PatternScan;
 
+#if NICAM_ENABLE_LEGACY_DEMOD
 typedef struct {
     size_t samples;
     size_t quarter_counts[4];
     double mean_magnitude;
     double mean_delta;
 } SymbolStats;
+#endif
 
 typedef struct {
     double *taps;
@@ -192,7 +202,8 @@ static void init_scramble(void) {
 static void usage(const char *argv0) {
     fprintf(stderr,
             "Gebruik: %s [--sample-rate 1456000] [--input-sample-rate HZ] [--iq-format u8|s16] [--frontend-lowpass-hz HZ] [--carrier-search-hz HZ] [--carrier-search-step-hz HZ] [--timing-search-steps N] [--matched-filter] [--adaptive-demod|--adaptive-fixed] [--descramble-phase N|--legacy-descramble] [--ram-read-start N] [--ram-read-stride N] [--lock-confirm-frames N] [--lock-drop-frames N] [--bitstream-quality] [--verbose]\n"
-            "stdin: interleaved IQ, default rtl_sdr uint8; stdout: stereo s16le 32 kHz\n",
+            "stdin: interleaved IQ, default rtl_sdr uint8; stdout: stereo s16le 32 kHz\n"
+            "default: adaptive-fixed decoder; legacy non-adaptive demod requires -DNICAM_ENABLE_LEGACY_DEMOD=1\n",
             argv0);
 }
 
@@ -577,6 +588,7 @@ static size_t raw_to_samples(const uint8_t *raw, size_t raw_bytes, const Config 
     return iq_samples;
 }
 
+#if NICAM_ENABLE_LEGACY_DEMOD
 static complexd interpolate_sample(const complexd *samples, size_t sample_count, double pos) {
     complexd out = {0.0, 0.0};
     if (pos < 0.0) {
@@ -595,6 +607,7 @@ static complexd interpolate_sample(const complexd *samples, size_t sample_count,
     out.im = samples[i0].im * (1.0 - frac) + samples[i1].im * frac;
     return out;
 }
+#endif
 
 static int init_resampler(Resampler *rs, int input_rate, int output_rate) {
     memset(rs, 0, sizeof(*rs));
@@ -658,6 +671,7 @@ static void resample_linear_stream(Resampler *rs, const complexd *in, size_t in_
     rs->have_last = 1;
 }
 
+#if NICAM_ENABLE_LEGACY_DEMOD
 static size_t timing_symbols_from_samples(
     const complexd *samples,
     size_t sample_count,
@@ -677,6 +691,7 @@ static size_t timing_symbols_from_samples(
     }
     return usable;
 }
+#endif
 
 static int init_matched_filter(MatchedFilter *mf, const Config *cfg) {
     memset(mf, 0, sizeof(*mf));
@@ -849,6 +864,7 @@ static void filter_frontend_stream(FrontendFilter *ff, const complexd *in, size_
     free(padded);
 }
 
+#if NICAM_ENABLE_LEGACY_DEMOD
 static void rotate_stream(const complexd *in, size_t samples, double phase_step, complexd *out) {
     double phase = 0.0;
     double c = cos(phase_step);
@@ -866,6 +882,7 @@ static void rotate_stream(const complexd *in, size_t samples, double phase_step,
         (void)phase;
     }
 }
+#endif
 
 static void filter_iq_stream(MatchedFilter *mf, const complexd *in, size_t samples, complexd *out) {
     size_t tail_len = mf->taps_len - 1;
@@ -906,6 +923,7 @@ static void filter_iq_stream(MatchedFilter *mf, const complexd *in, size_t sampl
     free(padded);
 }
 
+#if NICAM_ENABLE_LEGACY_DEMOD
 static size_t demod_symbols_variant(
     const complexd *sym,
     size_t symbols,
@@ -989,6 +1007,7 @@ static size_t demod_symbols_variant(
     free(phase_delta);
     return out_idx;
 }
+#endif
 
 static complexd complex_conj_if(complexd x, int conjugate) {
     if (conjugate) {
@@ -1834,6 +1853,7 @@ static void describe_bits(const uint8_t *bits, size_t count, char *buf, size_t b
     }
 }
 
+#if NICAM_ENABLE_LEGACY_DEMOD
 static int hamming_distance_bits(const uint8_t *a, const uint8_t *b, size_t count) {
     int dist = 0;
     for (size_t i = 0; i < count; i++) {
@@ -1841,6 +1861,7 @@ static int hamming_distance_bits(const uint8_t *a, const uint8_t *b, size_t coun
     }
     return dist;
 }
+#endif
 
 static void describe_ctrl16(const uint8_t ctrl16[16], char *cbits, size_t cbits_len, char *abits, size_t abits_len) {
     describe_bits(ctrl16, 5, cbits, cbits_len);
@@ -1860,6 +1881,7 @@ static int c0_expected_for_phase(int phase, int frame_index) {
     return pos < 8 ? 1 : 0;
 }
 
+#if NICAM_ENABLE_LEGACY_DEMOD
 static int c0_pattern_errors(const uint8_t *bits, size_t len, size_t offset, const Config *cfg, int *frames_out) {
     uint8_t body[BODY_BITS];
     int c0[16];
@@ -1893,6 +1915,7 @@ static int c0_pattern_errors(const uint8_t *bits, size_t len, size_t offset, con
     }
     return best;
 }
+#endif
 
 static PatternScan scan_pattern(const uint8_t *bits, size_t len, const uint8_t pattern[8]) {
     PatternScan scan;
@@ -3269,6 +3292,7 @@ static int decode_payload_variant(
     return decode_ranges_and_errors(words, left, right);
 }
 
+#if NICAM_ENABLE_LEGACY_DEMOD
 static int frame_quality_score(
     const uint8_t *frame,
     const Config *cfg,
@@ -3383,6 +3407,7 @@ static ssize_t find_lock_with_score(const BitBuffer *bb, const Config *cfg, int 
     }
     return best_offset;
 }
+#endif
 
 static int write_all(const void *data, size_t bytes) {
     const uint8_t *p = (const uint8_t *)data;
@@ -3410,6 +3435,13 @@ int main(int argc, char **argv) {
         return 2;
     }
     init_scramble();
+#if !NICAM_ENABLE_LEGACY_DEMOD
+    if (!cfg.adaptive_demod) {
+        cfg.adaptive_demod = 1;
+        cfg.adaptive_fixed = 1;
+        cfg.matched_filter = 1;
+    }
+#endif
     FrontendFilter frontend;
     if (init_frontend_filter(&frontend, &cfg) != 0) {
         fprintf(stderr, "frontend filter initialisatie mislukt\n");
@@ -3434,6 +3466,12 @@ int main(int argc, char **argv) {
         return rc;
     }
 
+#if !NICAM_ENABLE_LEGACY_DEMOD
+    fprintf(stderr, "legacy non-adaptive demod is disabled in this build; use --adaptive-fixed\n");
+    free_frontend_filter(&frontend);
+    free_matched_filter(&matched);
+    return 2;
+#else
     const size_t bytes_per_iq = cfg.iq_format == IQ_FORMAT_S16 ? 4 : 2;
     const size_t raw_bytes = 1 << 20;
     uint8_t *raw = (uint8_t *)malloc(raw_bytes);
@@ -3919,4 +3957,5 @@ int main(int argc, char **argv) {
     free_frontend_filter(&frontend);
     free_matched_filter(&matched);
     return 0;
+#endif
 }
