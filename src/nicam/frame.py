@@ -71,7 +71,7 @@ def build_frame(
     payload_bits = np.asarray(payload, dtype=np.uint8)
     if payload_bits.size != PAYLOAD_BITS:
         raise ValueError(f"payload must be {PAYLOAD_BITS} bits")
-    flag = (frame_index // 8) & 1
+    flag = int((frame_index % 16) < 8)
     ci = np.array(
         [
             flag,
@@ -159,11 +159,10 @@ def deinterleave_payload(transmitted_payload: np.ndarray) -> np.ndarray:
     if tx.size != PAYLOAD_BITS:
         raise ValueError(f"payload must be {PAYLOAD_BITS} bits")
     out = np.empty_like(tx)
-    idx = 0
-    for col in range(16):
-        for row in range(44):
-            out[row * 16 + col] = tx[idx]
-            idx += 1
+    for raw_index in range(PAYLOAD_BITS):
+        row = raw_index % 44
+        col = raw_index // 44
+        out[raw_index] = tx[row * 16 + col]
     return out
 
 
@@ -172,9 +171,8 @@ def interleave_payload(payload: np.ndarray) -> np.ndarray:
     if payload.size != PAYLOAD_BITS:
         raise ValueError(f"payload must be {PAYLOAD_BITS} bits")
     out = np.empty_like(payload)
-    idx = 0
-    for col in range(16):
-        for row in range(44):
-            out[idx] = payload[row * 16 + col]
-            idx += 1
+    for raw_index in range(PAYLOAD_BITS):
+        row = raw_index % 44
+        col = raw_index // 44
+        out[row * 16 + col] = payload[raw_index]
     return out
