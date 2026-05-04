@@ -3,6 +3,7 @@
 #include <errno.h>
 #include <iio.h>
 #include <math.h>
+#include <poll.h>
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
@@ -55,6 +56,7 @@ typedef struct {
     int status_every;
     int realtime;
     int pulse_shape;
+    int pcm_timeout_ms;
     int seconds;
     SourceMode source;
     char station_id[9];
@@ -80,6 +82,21 @@ typedef struct {
 static void handle_signal(int sig) {
     (void)sig;
     stop_requested = 1;
+}
+
+static void install_signal_handlers(void) {
+    struct sigaction sa;
+    memset(&sa, 0, sizeof(sa));
+    sa.sa_handler = handle_signal;
+    sigemptyset(&sa.sa_mask);
+    sigaction(SIGINT, &sa, NULL);
+    sigaction(SIGTERM, &sa, NULL);
+
+    struct sigaction pipe_sa;
+    memset(&pipe_sa, 0, sizeof(pipe_sa));
+    pipe_sa.sa_handler = SIG_IGN;
+    sigemptyset(&pipe_sa.sa_mask);
+    sigaction(SIGPIPE, &pipe_sa, NULL);
 }
 
 static double monotonic_seconds(void) {
@@ -112,7 +129,8 @@ static void usage(const char *prog) {
             "[--tx-amplitude A] [--nicam-rf-level 0..1023] [--tone-hz HZ] "
             "[--pulse-rolloff R] [--pulse-span-symbols N] [--no-pulse-shape] "
             "[--buffer-frames N] [--kernel-buffers N] [--station-id TEXT] "
-            "[--status-every N] [--seconds N] [--iq-out FILE] [--no-realtime]\n",
+            "[--status-every N] [--pcm-timeout-ms N] [--seconds N] "
+            "[--iq-out FILE] [--no-realtime]\n",
             prog);
 }
 
@@ -290,20 +308,48 @@ static void rrc_push(RrcShaper *shaper, double in_i, double in_q, double *out_i,
     *out_q = acc_q;
 }
 
-static size_t read_full(FILE *fp, uint8_t *buf, size_t bytes) {
+static size_t read_pcm_bytes(FILE *fp, uint8_t *buf, size_t bytes, int timeout_ms) {
     size_t have = 0;
+    int fd = fileno(fp);
     while (have < bytes && !stop_requested) {
-        size_t got = fread(buf + have, 1, bytes - have, fp);
-        if (got > 0) {
-            have += got;
-            continue;
-        }
-        if (ferror(fp)) {
-            if (errno == EINTR) {
-                clearerr(fp);
+        if (fd < 0) {
+            size_t got = fread(buf + have, 1, bytes - have, fp);
+            if (got > 0) {
+                have += got;
                 continue;
             }
             break;
+        }
+        if (fd >= 0 && timeout_ms >= 0) {
+            struct pollfd pfd;
+            pfd.fd = fd;
+            pfd.events = POLLIN | POLLHUP | POLLERR;
+            pfd.revents = 0;
+            int ready = poll(&pfd, 1, timeout_ms);
+            if (ready == 0) {
+                break;
+            }
+            if (ready < 0) {
+                if (errno == EINTR) {
+                    continue;
+                }
+                break;
+            }
+            if ((pfd.revents & POLLIN) == 0 && (pfd.revents & (POLLHUP | POLLERR)) != 0) {
+                break;
+            }
+        }
+
+        ssize_t got = read(fd, buf + have, bytes - have);
+        if (got > 0) {
+            have += (size_t)got;
+            continue;
+        }
+        if (got == 0) {
+            break;
+        }
+        if (errno == EINTR) {
+            continue;
         }
         break;
     }
@@ -321,9 +367,9 @@ static void make_tone_pcm(int16_t pcm[PCM_VALUES], double tone_hz, double tone_l
     }
 }
 
-static void read_pcm_frame(FILE *fp, int16_t pcm[PCM_VALUES]) {
+static void read_pcm_frame(const Config *cfg, FILE *fp, int16_t pcm[PCM_VALUES]) {
     uint8_t raw[PCM_VALUES * 2];
-    size_t got = read_full(fp, raw, sizeof(raw));
+    size_t got = read_pcm_bytes(fp, raw, sizeof(raw), cfg->pcm_timeout_ms);
     if (got < sizeof(raw)) {
         memset(raw + got, 0, sizeof(raw) - got);
         if (fp != stdin && feof(fp)) {
@@ -559,7 +605,7 @@ static void generate_frame(
     if (cfg->source == SOURCE_TONE) {
         make_tone_pcm(pcm, cfg->tone_hz, cfg->tone_level, frame_index);
     } else if (cfg->source == SOURCE_PCM) {
-        read_pcm_frame(pcm_fp, pcm);
+        read_pcm_frame(cfg, pcm_fp, pcm);
     } else {
         memset(pcm, 0, sizeof(pcm));
     }
@@ -589,6 +635,7 @@ static int parse_args(int argc, char **argv, Config *cfg) {
     cfg->status_every = 50;
     cfg->realtime = 1;
     cfg->pulse_shape = 1;
+    cfg->pcm_timeout_ms = 120;
     cfg->seconds = 0;
     cfg->source = SOURCE_TONE;
     memset(cfg->station_id, 0, sizeof(cfg->station_id));
@@ -630,6 +677,8 @@ static int parse_args(int argc, char **argv, Config *cfg) {
             cfg->kernel_buffers = (unsigned int)atoi(argv[++i]);
         } else if (strcmp(argv[i], "--status-every") == 0 && i + 1 < argc) {
             cfg->status_every = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--pcm-timeout-ms") == 0 && i + 1 < argc) {
+            cfg->pcm_timeout_ms = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--seconds") == 0 && i + 1 < argc) {
             cfg->seconds = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--station-id") == 0 && i + 1 < argc) {
@@ -725,9 +774,7 @@ int main(int argc, char **argv) {
         return 2;
     }
 
-    signal(SIGINT, handle_signal);
-    signal(SIGTERM, handle_signal);
-    signal(SIGPIPE, SIG_IGN);
+    install_signal_handlers();
     init_scramble();
 
     FILE *pcm_fp = stdin;
