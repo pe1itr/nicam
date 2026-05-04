@@ -88,6 +88,18 @@ python -m nicam.stream_tx \
 `stream_tx` gebruikt `ffmpeg` om de URL of audiobestanden naar `s16le`, stereo,
 32 kHz te decoderen.
 
+Digital Baseband V1.4-compatible station-ID kan in de NICAM additional-data
+bits worden meegestuurd. Alleen de eerste 8 ASCII-tekens worden gebruikt:
+
+```sh
+python -m nicam.stream_tx --tone --station-id PE1MUD --out /tmp/nicam.iq
+NICAM_TX_STATION_ID=PE1MUD tools/tim-nicam-tx
+```
+
+De mapping is `AD0..AD2 = tekenpositie 0..7` en `AD3..AD10 = ASCII-teken`.
+De C-decoder print een gestabiliseerde ontvangen ID op stderr als
+`station_id=...`.
+
 Praktisch commando om een internetstream direct door de hele keten te starten:
 
 ```sh

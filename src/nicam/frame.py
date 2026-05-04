@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Optional
 
 import numpy as np
 
@@ -64,8 +65,33 @@ def build_test_frame(frame_index: int = 0, mode: int = 0, fallback: int = 0) -> 
     return build_frame(np.zeros(PAYLOAD_BITS, dtype=np.uint8), frame_index, mode, fallback)
 
 
+def station_id_ad_bits(station_id: Optional[str], frame_index: int) -> np.ndarray:
+    """Digital Baseband V1.4 compatible station ID in NICAM AD bits.
+
+    AD0..AD2 carry the character position, AD3..AD10 carry one ASCII character.
+    Each character is held for about 120 ms to make slow MSP34x5G I2C polling
+    reliable.
+    """
+    ad = np.zeros(11, dtype=np.uint8)
+    if station_id is None:
+        return ad
+
+    text = station_id.encode("ascii", errors="replace")[:8].ljust(8, b" ")
+    pos = (frame_index // 120) % 8
+    char = text[pos]
+    for bit in range(3):
+        ad[bit] = (pos >> bit) & 1
+    for bit in range(8):
+        ad[3 + bit] = (char >> bit) & 1
+    return ad
+
+
 def build_frame(
-    payload: np.ndarray, frame_index: int = 0, mode: int = 0, fallback: int = 0
+    payload: np.ndarray,
+    frame_index: int = 0,
+    mode: int = 0,
+    fallback: int = 0,
+    station_id: Optional[str] = None,
 ) -> np.ndarray:
     """Build a scrambled NICAM frame from an already interleaved 704-bit payload."""
     payload_bits = np.asarray(payload, dtype=np.uint8)
@@ -82,7 +108,7 @@ def build_frame(
         ],
         dtype=np.uint8,
     )
-    ad = np.zeros(11, dtype=np.uint8)
+    ad = station_id_ad_bits(station_id, frame_index)
     body = np.concatenate([ci, ad, payload_bits])
     return np.concatenate([FAW, scramble_body(body)])
 

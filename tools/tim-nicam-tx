@@ -22,6 +22,7 @@ NICAM_TX_AMPLITUDE="${NICAM_TX_AMPLITUDE:-0.8}"
 NICAM_TX_SOURCE="${NICAM_TX_SOURCE:-stream}"
 NICAM_TX_STREAM_URL="${NICAM_TX_STREAM_URL:-https://icecast.omroep.nl/radio2-bb-aac}"
 NICAM_TX_AUDIO_FILE="${NICAM_TX_AUDIO_FILE:-}"
+NICAM_TX_STATION_ID="${NICAM_TX_STATION_ID:-}"
 NICAM_TX_EXTRA_ARGS="${NICAM_TX_EXTRA_ARGS:-}"
 NICAM_PLUTO_EXTRA_ARGS="${NICAM_PLUTO_EXTRA_ARGS:-}"
 
@@ -31,6 +32,10 @@ tx_args=(
   --sample-rate "${NICAM_TX_SAMPLE_RATE}"
   --ffmpeg-reconnect
 )
+
+if [[ -n "${NICAM_TX_STATION_ID}" ]]; then
+  tx_args+=(--station-id "${NICAM_TX_STATION_ID}")
+fi
 
 case "${NICAM_TX_SOURCE}" in
   stream)

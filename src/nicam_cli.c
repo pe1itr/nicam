@@ -163,6 +163,11 @@ typedef struct {
     double y1[2];
 } J17Filter;
 
+typedef struct {
+    unsigned counts[8][95];
+    char displayed[9];
+} StationIdState;
+
 static uint8_t scramble[BODY_BITS];
 
 static void init_scramble(void) {
@@ -420,6 +425,8 @@ static int decode_payload_pcm(
     int ram_read_start,
     int ram_read_stride
 );
+static void station_id_init(StationIdState *state);
+static void station_id_update(StationIdState *state, const uint8_t ctrl16[16]);
 static int write_all(const void *data, size_t bytes);
 static PatternScan scan_pattern(const uint8_t *bits, size_t len, const uint8_t pattern[8]);
 static void bitstream_quality_report(const HypothesisState *hyp, const Config *cfg);
@@ -1235,6 +1242,50 @@ static int adaptive_setup_hypotheses(const Config *cfg, AdaptiveHypothesisState 
     return 0;
 }
 
+static void station_id_init(StationIdState *state) {
+    memset(state, 0, sizeof(*state));
+    memcpy(state->displayed, "        ", 8);
+    state->displayed[8] = '\0';
+}
+
+static void station_id_update(StationIdState *state, const uint8_t ctrl16[16]) {
+    int pos = (ctrl16[5] & 1U) | ((ctrl16[6] & 1U) << 1) | ((ctrl16[7] & 1U) << 2);
+    int ch = 0;
+    for (int bit = 0; bit < 8; bit++) {
+        ch |= (ctrl16[8 + bit] & 1U) << bit;
+    }
+    if (pos < 0 || pos >= 8 || ch < 32 || ch > 126) {
+        return;
+    }
+
+    unsigned *bucket = state->counts[pos];
+    unsigned total = 0;
+    for (int i = 0; i < 95; i++) {
+        total += bucket[i];
+    }
+    if (total > 2000) {
+        for (int i = 0; i < 95; i++) {
+            bucket[i] = (bucket[i] + 1U) / 2U;
+        }
+    }
+    bucket[ch - 32]++;
+
+    unsigned best_count = 0;
+    int best_ch = 32;
+    for (int i = 0; i < 95; i++) {
+        if (bucket[i] > best_count) {
+            best_count = bucket[i];
+            best_ch = i + 32;
+        }
+    }
+    if (best_count < 3 || state->displayed[pos] == (char)best_ch) {
+        return;
+    }
+
+    state->displayed[pos] = (char)best_ch;
+    fprintf(stderr, "station_id=%s\n", state->displayed);
+}
+
 static int run_adaptive_quality(const Config *cfg, FrontendFilter *frontend, MatchedFilter *matched) {
     AdaptiveHypothesisState *hps = NULL;
     size_t hyp_count = 0;
@@ -1272,7 +1323,9 @@ static int run_adaptive_quality(const Config *cfg, FrontendFilter *frontend, Mat
     int adaptive_align_drops = 0;
     int adaptive_sync_bit_drops = 0;
     int adaptive_last_stat_frame = 0;
+    StationIdState station_id;
     J17Filter j17;
+    station_id_init(&station_id);
     init_j17_filter(&j17, 32000.0);
 
     while (1) {
@@ -1383,6 +1436,7 @@ static int run_adaptive_quality(const Config *cfg, FrontendFilter *frontend, Mat
                 int pcm_step = pcm_max_step(pcm, last_output, have_last_output);
                 int pcm_continuity_ok = cfg->max_pcm_step <= 0 || !have_last_output || pcm_step <= cfg->max_pcm_step;
                 if (mode_supported && parity_errors <= cfg->max_parity_errors && pcm_continuity_ok) {
+                    station_id_update(&station_id, body);
                     if (pending_conceal_frames > 0 && have_last_output) {
                         int16_t bridge_pcm[PCM_SAMPLES];
                         int16_t bridge_start[2] = {last_output[0], last_output[1]};
@@ -3461,7 +3515,9 @@ int main(int argc, char **argv) {
     int last_good_post_errors = -1;
     int last_good_lock_quality = -1;
     uint8_t last_good_ctrl16[16] = {0};
+    StationIdState station_id;
     int16_t last_pcm[PCM_SAMPLES] = {0};
+    station_id_init(&station_id);
 
     while (1) {
         int got = read_exactish(raw, raw_bytes);
@@ -3769,6 +3825,7 @@ int main(int argc, char **argv) {
                 memset(pcm, 0, sizeof(pcm));
             }
             if (parity_ok) {
+                station_id_update(&station_id, ctrl16);
                 lock_bad_streak = 0;
                 lock_sync_miss = 0;
                 memcpy(last_pcm, pcm, sizeof(pcm));

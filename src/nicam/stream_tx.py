@@ -83,6 +83,9 @@ def run(args: argparse.Namespace) -> int:
     source = open_audio_source(args)
     out = sys.stdout.buffer if args.out == "-" else open(args.out, "wb")
     amplitude = nicam_level_to_amplitude(args)
+    station_id = args.station_id
+    if station_id is not None:
+        station_id = station_id[:8]
     j17 = J17Preemphasis()
     encode_payload = pcm16_to_payload if args.payload_format == "lab" else None
     frame_bytes = PCM_VALUES_PER_NICAM_FRAME * 2
@@ -111,7 +114,13 @@ def run(args: argparse.Namespace) -> int:
                 if encode_payload is not None
                 else pcm16_to_nicam_payload_j17(pcm, j17)
             )
-            bits = build_frame(payload, frame_index=frame_index, mode=0, fallback=0)
+            bits = build_frame(
+                payload,
+                frame_index=frame_index,
+                mode=0,
+                fallback=0,
+                station_id=station_id,
+            )
             symbols = bits_to_symbols(bits, phase_quarter)
             phase_quarter = final_phase_quarter(bits, phase_quarter)
             if args.pulse_shape:
@@ -201,6 +210,10 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         choices=["nicam728", "lab"],
         default="nicam728",
         help="audio payload codec (default: nicam728)",
+    )
+    parser.add_argument(
+        "--station-id",
+        help="send first 8 ASCII characters in NICAM additional data bits, compatible with Digital Baseband V1.4",
     )
     parser.add_argument("--out", default="-", help="IQ output file, or - for stdout")
     parser.add_argument("--flush-frames", type=int, default=20)
