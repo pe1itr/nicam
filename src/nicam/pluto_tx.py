@@ -280,12 +280,12 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     )
     parser.set_defaults(repeat_on_underrun=False)
     parser.add_argument(
-        "--no-realtime-pace",
+        "--realtime-pace",
         dest="realtime_pace",
-        action="store_false",
-        help="do not pace non-cyclic writes to the configured sample rate",
+        action="store_true",
+        help="pace non-cyclic writes in Python; normally leave this off because pyadi blocks on TX buffers",
     )
-    parser.set_defaults(realtime_pace=True)
+    parser.set_defaults(realtime_pace=False)
     parser.add_argument(
         "--status-interval",
         type=float,
