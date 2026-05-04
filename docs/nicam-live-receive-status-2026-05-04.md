@@ -11,6 +11,10 @@ payload, decodes stereo PCM, applies J.17 de-emphasis and plays live audio.
 
 ## Working Pipeline
 
+The current cleanup/reference baseline is recorded in
+`docs/nicam-reference-path.md`. Keep that command shape as the regression target
+while simplifying the decoder.
+
 Run from the AFEDRI pipeline checkout:
 
 ```sh
