@@ -90,6 +90,7 @@ def stream_noncyclic_u8_iq_to_pluto(
     stop_event = threading.Event()
     stats = {"input_buffers": 0, "tx_buffers": 0, "underruns": 0}
     buffer_duration_ms = 1000.0 * float(args.buffer_samples) / float(args.sample_rate)
+    buffer_duration_s = buffer_duration_ms / 1000.0
     underrun_timeout_s = args.underrun_timeout_ms / 1000.0
     if underrun_timeout_s <= 0.0:
         underrun_timeout_s = max(0.05, buffer_duration_ms * 1.5 / 1000.0)
@@ -124,11 +125,18 @@ def stream_noncyclic_u8_iq_to_pluto(
         prebuffered += 1
 
     next_report = time.monotonic() + args.status_interval
+    next_tx_time = time.monotonic()
     try:
         for item in initial_buffers:
+            if args.realtime_pace:
+                sleep_s = next_tx_time - time.monotonic()
+                if sleep_s > 0:
+                    time.sleep(sleep_s)
             sdr.tx(item)
             stats["tx_buffers"] += 1
             last_buffer = item
+            if args.realtime_pace:
+                next_tx_time += buffer_duration_s
 
         while True:
             try:
@@ -147,9 +155,18 @@ def stream_noncyclic_u8_iq_to_pluto(
                 if not thread.is_alive() and buffers.empty():
                     break
             else:
+                if args.realtime_pace:
+                    sleep_s = next_tx_time - time.monotonic()
+                    if sleep_s > 0:
+                        time.sleep(sleep_s)
                 sdr.tx(item)
                 stats["tx_buffers"] += 1
                 last_buffer = item
+                if args.realtime_pace:
+                    next_tx_time += buffer_duration_s
+                    now = time.monotonic()
+                    if next_tx_time < now - buffer_duration_s:
+                        next_tx_time = now
 
             if args.status_interval > 0 and time.monotonic() >= next_report:
                 print(
@@ -158,6 +175,7 @@ def stream_noncyclic_u8_iq_to_pluto(
                     f"tx_buffers={stats['tx_buffers']} "
                     f"queue={buffers.qsize()} "
                     f"underruns={stats['underruns']} "
+                    f"pace={'on' if args.realtime_pace else 'off'} "
                     f"timeout_ms={underrun_timeout_s * 1000.0:.0f}",
                     file=sys.stderr,
                 )
@@ -245,7 +263,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument(
         "--prebuffer-buffers",
         type=int,
-        default=4,
+        default=8,
         help="queue this many TX buffers before starting non-cyclic Pluto output",
     )
     parser.add_argument(
@@ -260,6 +278,14 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         action="store_false",
         help="leave Pluto input gaps visible instead of repeating the last buffer",
     )
+    parser.set_defaults(repeat_on_underrun=False)
+    parser.add_argument(
+        "--no-realtime-pace",
+        dest="realtime_pace",
+        action="store_false",
+        help="do not pace non-cyclic writes to the configured sample rate",
+    )
+    parser.set_defaults(realtime_pace=True)
     parser.add_argument(
         "--status-interval",
         type=float,
