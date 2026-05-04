@@ -178,6 +178,8 @@ typedef struct {
     char displayed[9];
     int last_pos;
     unsigned seen_mask;
+    unsigned updates;
+    unsigned cycles;
 } StationIdState;
 
 static uint8_t scramble[BODY_BITS];
@@ -1283,6 +1285,10 @@ static void station_id_update(StationIdState *state, const uint8_t ctrl16[16]) {
     if (pos != state->last_pos) {
         state->last_pos = pos;
         state->seen_mask |= 1U << pos;
+        state->updates++;
+        if (completed_cycle) {
+            state->cycles++;
+        }
     }
 
     unsigned *bucket = state->counts[pos];
@@ -1306,14 +1312,10 @@ static void station_id_update(StationIdState *state, const uint8_t ctrl16[16]) {
         }
     }
     if (best_count < 3 || state->displayed[pos] == (char)best_ch) {
-        if (completed_cycle) {
-            fprintf(stderr, "station_id=%s\n", state->displayed);
-        }
         return;
     }
 
     state->displayed[pos] = (char)best_ch;
-    fprintf(stderr, "station_id=%s\n", state->displayed);
 }
 
 static int run_adaptive_quality(const Config *cfg, FrontendFilter *frontend, MatchedFilter *matched) {
@@ -1353,6 +1355,8 @@ static int run_adaptive_quality(const Config *cfg, FrontendFilter *frontend, Mat
     int adaptive_align_drops = 0;
     int adaptive_sync_bit_drops = 0;
     int adaptive_last_stat_frame = 0;
+    int adaptive_no_faw_chunks = 0;
+    int adaptive_resets = 0;
     StationIdState station_id;
     J17Filter j17;
     station_id_init(&station_id);
@@ -1427,6 +1431,22 @@ static int run_adaptive_quality(const Config *cfg, FrontendFilter *frontend, Mat
                     best_stream_offset = scan.best_offset;
                     best_stream_hyp = hyp;
                 }
+            }
+            if (best_stream_hits == 0) {
+                adaptive_no_faw_chunks++;
+                if (adaptive_no_faw_chunks >= 20) {
+                    for (size_t hyp = 0; hyp < hyp_count; hyp++) {
+                        adaptive_init_hypothesis(&hps[hyp], cfg);
+                    }
+                    pending_conceal_frames = 0;
+                    have_last_pcm = 0;
+                    have_last_output = 0;
+                    adaptive_no_faw_chunks = 0;
+                    adaptive_resets++;
+                    continue;
+                }
+            } else {
+                adaptive_no_faw_chunks = 0;
             }
             BitBuffer *bb = &hps[best_stream_hyp].bits;
             if (best_stream_offset > 0) {
@@ -1540,7 +1560,7 @@ static int run_adaptive_quality(const Config *cfg, FrontendFilter *frontend, Mat
                 if (cfg->stats_every > 0 &&
                     adaptive_frames - adaptive_last_stat_frame >= cfg->stats_every) {
                     fprintf(stderr,
-                            "nicam_stats frames=%d bad=%d pending=%d align_drop_bits=%d sync_drop_bits=%d bb_bits=%zu hyp=%zu faw_hits=%zu faw_errsum=%d\n",
+                            "nicam_stats frames=%d bad=%d pending=%d align_drop_bits=%d sync_drop_bits=%d bb_bits=%zu hyp=%zu faw_hits=%zu faw_errsum=%d resets=%d station_id=%s station_cycles=%u\n",
                             adaptive_frames,
                             adaptive_bad_frames,
                             pending_conceal_frames,
@@ -1549,7 +1569,10 @@ static int run_adaptive_quality(const Config *cfg, FrontendFilter *frontend, Mat
                             bb->len,
                             best_stream_hyp,
                             best_stream_hits,
-                            best_stream_errors);
+                            best_stream_errors,
+                            adaptive_resets,
+                            station_id.displayed,
+                            station_id.cycles);
                     adaptive_last_stat_frame = adaptive_frames;
                 }
                 bitbuf_drop(bb, FRAME_BITS);
