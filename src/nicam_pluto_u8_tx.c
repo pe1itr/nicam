@@ -8,6 +8,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 #include <unistd.h>
 
 static volatile sig_atomic_t stop_requested = 0;
@@ -21,9 +22,33 @@ static void usage(const char *prog) {
     fprintf(stderr,
             "Gebruik: %s --lo HZ [--sample-rate HZ] [--tx-gain DB] "
             "[--rf-bandwidth HZ] [--amplitude A] [--buffer-samples N] "
-            "[--uri URI] [--iq-in FILE] [--status-every N]\n"
+            "[--kernel-buffers N] [--uri URI] [--iq-in FILE] "
+            "[--status-every N] [--no-realtime]\n"
             "stdin/default input: rtl_sdr-style interleaved uint8 IQ\n",
             prog);
+}
+
+static double monotonic_seconds(void) {
+    struct timespec ts;
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+    return (double)ts.tv_sec + (double)ts.tv_nsec / 1000000000.0;
+}
+
+static void sleep_until(double target) {
+    while (!stop_requested) {
+        double now = monotonic_seconds();
+        double remaining = target - now;
+        if (remaining <= 0.0) {
+            return;
+        }
+        struct timespec req;
+        req.tv_sec = (time_t)remaining;
+        req.tv_nsec = (long)((remaining - (double)req.tv_sec) * 1000000000.0);
+        if (req.tv_nsec < 0) {
+            req.tv_nsec = 0;
+        }
+        nanosleep(&req, NULL);
+    }
 }
 
 static int write_ll_attr(struct iio_channel *chn, const char *attr, long long value) {
@@ -90,7 +115,9 @@ int main(int argc, char **argv) {
     double tx_gain = 0.0;
     double amplitude = 3.0;
     size_t buffer_samples = 65536;
+    unsigned int kernel_buffers = 4;
     int status_every = 50;
+    int realtime = 1;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--uri") == 0 && i + 1 < argc) {
@@ -109,8 +136,12 @@ int main(int argc, char **argv) {
             amplitude = atof(argv[++i]);
         } else if (strcmp(argv[i], "--buffer-samples") == 0 && i + 1 < argc) {
             buffer_samples = (size_t)atoll(argv[++i]);
+        } else if (strcmp(argv[i], "--kernel-buffers") == 0 && i + 1 < argc) {
+            kernel_buffers = (unsigned int)atoi(argv[++i]);
         } else if (strcmp(argv[i], "--status-every") == 0 && i + 1 < argc) {
             status_every = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--no-realtime") == 0) {
+            realtime = 0;
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             usage(argv[0]);
             return 0;
@@ -184,6 +215,12 @@ int main(int argc, char **argv) {
 
     iio_channel_enable(tx_i);
     iio_channel_enable(tx_q);
+    if (kernel_buffers > 0) {
+        int ret = iio_device_set_kernel_buffers_count(tx, kernel_buffers);
+        if (ret < 0) {
+            fprintf(stderr, "Waarschuwing: kernel buffer count niet gezet: %s\n", strerror(-ret));
+        }
+    }
 
     struct iio_buffer *buf = iio_device_create_buffer(tx, buffer_samples, false);
     if (buf == NULL) {
@@ -208,6 +245,9 @@ int main(int argc, char **argv) {
 
     long long buffers_sent = 0;
     long long samples_sent = 0;
+    double start_time = monotonic_seconds();
+    double next_push_time = start_time;
+    double buffer_seconds = (double)buffer_samples / (double)sample_rate;
     while (!stop_requested) {
         size_t got = read_full(iq_fp, raw, buffer_samples * 2);
         if (got < 2) {
@@ -234,6 +274,9 @@ int main(int argc, char **argv) {
             pq += step;
         }
 
+        if (realtime && buffers_sent > 0) {
+            sleep_until(next_push_time);
+        }
         ssize_t pushed = iio_buffer_push(buf);
         if (pushed < 0) {
             fprintf(stderr, "iio_buffer_push faalde: %s\n", strerror((int)-pushed));
@@ -241,10 +284,20 @@ int main(int argc, char **argv) {
         }
         buffers_sent++;
         samples_sent += (long long)samples;
+        if (realtime) {
+            next_push_time += buffer_seconds;
+            double now = monotonic_seconds();
+            if (next_push_time < now - buffer_seconds) {
+                next_push_time = now;
+            }
+        }
         if (status_every > 0 && buffers_sent % status_every == 0) {
+            double elapsed = monotonic_seconds() - start_time;
+            double nominal = (double)samples_sent / (double)sample_rate;
             fprintf(stderr,
-                    "nicam_pluto_u8_tx: buffers=%lld samples=%lld amplitude=%.3f\n",
-                    buffers_sent, samples_sent, amplitude);
+                    "nicam_pluto_u8_tx: buffers=%lld samples=%lld amplitude=%.3f "
+                    "elapsed=%.2f nominal=%.2f realtime=%d\n",
+                    buffers_sent, samples_sent, amplitude, elapsed, nominal, realtime);
         }
         if (samples < buffer_samples) {
             break;
