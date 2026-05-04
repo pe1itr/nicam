@@ -48,10 +48,13 @@ typedef struct {
     double baseband_amplitude;
     double tone_hz;
     double tone_level;
+    double pulse_rolloff;
+    int pulse_span_symbols;
     size_t buffer_frames;
     unsigned int kernel_buffers;
     int status_every;
     int realtime;
+    int pulse_shape;
     int seconds;
     SourceMode source;
     char station_id[9];
@@ -64,6 +67,15 @@ typedef struct {
     double x1[2];
     double y1[2];
 } J17Filter;
+
+typedef struct {
+    int enabled;
+    int sps;
+    int taps_len;
+    double *taps;
+    double *hist_i;
+    double *hist_q;
+} RrcShaper;
 
 static void handle_signal(int sig) {
     (void)sig;
@@ -98,6 +110,7 @@ static void usage(const char *prog) {
             "Gebruik: %s --lo HZ [--source tone|silence|pcm] [--pcm-in FILE|-] "
             "[--sample-rate HZ] [--tx-gain DB] [--rf-bandwidth HZ] "
             "[--tx-amplitude A] [--nicam-rf-level 0..1023] [--tone-hz HZ] "
+            "[--pulse-rolloff R] [--pulse-span-symbols N] [--no-pulse-shape] "
             "[--buffer-frames N] [--kernel-buffers N] [--station-id TEXT] "
             "[--status-every N] [--seconds N] [--iq-out FILE] [--no-realtime]\n",
             prog);
@@ -190,6 +203,91 @@ static void j17_process(J17Filter *f, int16_t pcm[PCM_VALUES]) {
             pcm[idx] = clamp_i16(lrint(y));
         }
     }
+}
+
+static double sinc1(double x) {
+    if (fabs(x) < 1e-12) {
+        return 1.0;
+    }
+    return sin(M_PI * x) / (M_PI * x);
+}
+
+static int rrc_init(RrcShaper *shaper, int enabled, int sps, double rolloff, int span_symbols) {
+    memset(shaper, 0, sizeof(*shaper));
+    shaper->enabled = enabled;
+    shaper->sps = sps;
+    if (!enabled) {
+        return 0;
+    }
+    if (sps <= 0 || rolloff < 0.0 || rolloff > 1.0) {
+        return -1;
+    }
+
+    int span = span_symbols < 2 ? 2 : span_symbols;
+    if (span & 1) {
+        span++;
+    }
+    int half = span * sps / 2;
+    shaper->taps_len = half * 2 + 1;
+    shaper->taps = calloc((size_t)shaper->taps_len, sizeof(double));
+    shaper->hist_i = calloc((size_t)shaper->taps_len, sizeof(double));
+    shaper->hist_q = calloc((size_t)shaper->taps_len, sizeof(double));
+    if (shaper->taps == NULL || shaper->hist_i == NULL || shaper->hist_q == NULL) {
+        return -1;
+    }
+
+    double sum = 0.0;
+    for (int idx = 0; idx < shaper->taps_len; idx++) {
+        double t = (double)(idx - half) / (double)sps;
+        double tap;
+        if (rolloff == 0.0) {
+            tap = sinc1(t);
+        } else if (fabs(t) < 1e-12) {
+            tap = 1.0 + rolloff * (4.0 / M_PI - 1.0);
+        } else if (fabs(fabs(4.0 * rolloff * t) - 1.0) < 1e-12) {
+            double angle = M_PI / (4.0 * rolloff);
+            tap = rolloff / sqrt(2.0) *
+                  ((1.0 + 2.0 / M_PI) * sin(angle) +
+                   (1.0 - 2.0 / M_PI) * cos(angle));
+        } else {
+            double numerator =
+                sin(M_PI * t * (1.0 - rolloff)) +
+                4.0 * rolloff * t * cos(M_PI * t * (1.0 + rolloff));
+            double denominator = M_PI * t * (1.0 - pow(4.0 * rolloff * t, 2.0));
+            tap = numerator / denominator;
+        }
+        shaper->taps[idx] = tap;
+        sum += tap;
+    }
+    if (sum != 0.0) {
+        for (int idx = 0; idx < shaper->taps_len; idx++) {
+            shaper->taps[idx] /= sum;
+        }
+    }
+    return 0;
+}
+
+static void rrc_free(RrcShaper *shaper) {
+    free(shaper->taps);
+    free(shaper->hist_i);
+    free(shaper->hist_q);
+    memset(shaper, 0, sizeof(*shaper));
+}
+
+static void rrc_push(RrcShaper *shaper, double in_i, double in_q, double *out_i, double *out_q) {
+    memmove(shaper->hist_i + 1, shaper->hist_i, (size_t)(shaper->taps_len - 1) * sizeof(double));
+    memmove(shaper->hist_q + 1, shaper->hist_q, (size_t)(shaper->taps_len - 1) * sizeof(double));
+    shaper->hist_i[0] = in_i;
+    shaper->hist_q[0] = in_q;
+
+    double acc_i = 0.0;
+    double acc_q = 0.0;
+    for (int i = 0; i < shaper->taps_len; i++) {
+        acc_i += shaper->taps[i] * shaper->hist_i[i];
+        acc_q += shaper->taps[i] * shaper->hist_q[i];
+    }
+    *out_i = acc_i;
+    *out_q = acc_q;
 }
 
 static size_t read_full(FILE *fp, uint8_t *buf, size_t bytes) {
@@ -381,7 +479,14 @@ static void build_frame_bits(const uint8_t payload[PAYLOAD_BITS], long long fram
     }
 }
 
-static void modulate_frame(const uint8_t bits[FRAME_BITS], int *phase_quarter, double amp, int16_t *iq_i, int16_t *iq_q) {
+static void modulate_frame(
+    const uint8_t bits[FRAME_BITS],
+    int *phase_quarter,
+    RrcShaper *shaper,
+    double amp,
+    int16_t *iq_i,
+    int16_t *iq_q
+) {
     size_t pos = 0;
     for (int b = 0; b < FRAME_BITS; b += 2) {
         int code = bits[b] * 2 + bits[b + 1];
@@ -410,17 +515,43 @@ static void modulate_frame(const uint8_t bits[FRAME_BITS], int *phase_quarter, d
                 im = -amp;
                 break;
         }
-        int16_t si = scale_to_i16(re);
-        int16_t sq = scale_to_i16(im);
-        for (int s = 0; s < 4; s++) {
-            iq_i[pos] = si;
-            iq_q[pos] = sq;
-            pos++;
+        if (shaper->enabled) {
+            for (int s = 0; s < shaper->sps; s++) {
+                double out_i = 0.0;
+                double out_q = 0.0;
+                rrc_push(
+                    shaper,
+                    s == 0 ? re * (double)shaper->sps : 0.0,
+                    s == 0 ? im * (double)shaper->sps : 0.0,
+                    &out_i,
+                    &out_q
+                );
+                iq_i[pos] = scale_to_i16(out_i);
+                iq_q[pos] = scale_to_i16(out_q);
+                pos++;
+            }
+        } else {
+            int16_t si = scale_to_i16(re);
+            int16_t sq = scale_to_i16(im);
+            for (int s = 0; s < 4; s++) {
+                iq_i[pos] = si;
+                iq_q[pos] = sq;
+                pos++;
+            }
         }
     }
 }
 
-static void generate_frame(Config *cfg, FILE *pcm_fp, J17Filter *j17, long long frame_index, int *phase_quarter, int16_t *iq_i, int16_t *iq_q) {
+static void generate_frame(
+    Config *cfg,
+    FILE *pcm_fp,
+    J17Filter *j17,
+    RrcShaper *shaper,
+    long long frame_index,
+    int *phase_quarter,
+    int16_t *iq_i,
+    int16_t *iq_q
+) {
     int16_t pcm[PCM_VALUES];
     uint8_t payload[PAYLOAD_BITS];
     uint8_t bits[FRAME_BITS];
@@ -436,7 +567,7 @@ static void generate_frame(Config *cfg, FILE *pcm_fp, J17Filter *j17, long long 
     j17_process(j17, pcm);
     encode_payload(pcm, payload);
     build_frame_bits(payload, frame_index, cfg->station_id, bits);
-    modulate_frame(bits, phase_quarter, cfg->baseband_amplitude * cfg->tx_amplitude, iq_i, iq_q);
+    modulate_frame(bits, phase_quarter, shaper, cfg->baseband_amplitude * cfg->tx_amplitude, iq_i, iq_q);
 }
 
 static int parse_args(int argc, char **argv, Config *cfg) {
@@ -451,10 +582,13 @@ static int parse_args(int argc, char **argv, Config *cfg) {
     cfg->baseband_amplitude = 200.0 / 1023.0;
     cfg->tone_hz = 1000.0;
     cfg->tone_level = 0.35;
+    cfg->pulse_rolloff = 0.4;
+    cfg->pulse_span_symbols = 6;
     cfg->buffer_frames = 50;
     cfg->kernel_buffers = 4;
     cfg->status_every = 50;
     cfg->realtime = 1;
+    cfg->pulse_shape = 1;
     cfg->seconds = 0;
     cfg->source = SOURCE_TONE;
     memset(cfg->station_id, 0, sizeof(cfg->station_id));
@@ -480,6 +614,10 @@ static int parse_args(int argc, char **argv, Config *cfg) {
             cfg->tone_hz = atof(argv[++i]);
         } else if (strcmp(argv[i], "--tone-level") == 0 && i + 1 < argc) {
             cfg->tone_level = atof(argv[++i]);
+        } else if (strcmp(argv[i], "--pulse-rolloff") == 0 && i + 1 < argc) {
+            cfg->pulse_rolloff = atof(argv[++i]);
+        } else if (strcmp(argv[i], "--pulse-span-symbols") == 0 && i + 1 < argc) {
+            cfg->pulse_span_symbols = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--buffer-frames") == 0 && i + 1 < argc) {
             cfg->buffer_frames = (size_t)atoll(argv[++i]);
         } else if (strcmp(argv[i], "--buffer-samples") == 0 && i + 1 < argc) {
@@ -515,6 +653,8 @@ static int parse_args(int argc, char **argv, Config *cfg) {
             cfg->iq_out_path = argv[++i];
         } else if (strcmp(argv[i], "--no-realtime") == 0) {
             cfg->realtime = 0;
+        } else if (strcmp(argv[i], "--no-pulse-shape") == 0) {
+            cfg->pulse_shape = 0;
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             usage(argv[0]);
             exit(0);
@@ -547,12 +687,19 @@ static int run_iq_file(Config *cfg, FILE *pcm_fp) {
 
     J17Filter j17;
     j17_init(&j17);
+    RrcShaper shaper;
+    if (rrc_init(&shaper, cfg->pulse_shape, (int)(cfg->sample_rate / SYMBOL_RATE),
+                 cfg->pulse_rolloff, cfg->pulse_span_symbols) < 0) {
+        fprintf(stderr, "Kan RRC pulse shaper niet initialiseren\n");
+        fclose(out);
+        return 1;
+    }
     int phase_quarter = 0;
     int16_t iq_i[IQ_SAMPLES_PER_FRAME];
     int16_t iq_q[IQ_SAMPLES_PER_FRAME];
     long long max_frames = cfg->seconds > 0 ? (long long)cfg->seconds * 1000 : 10000;
     for (long long frame = 0; frame < max_frames && !stop_requested; frame++) {
-        generate_frame(cfg, pcm_fp, &j17, frame, &phase_quarter, iq_i, iq_q);
+        generate_frame(cfg, pcm_fp, &j17, &shaper, frame, &phase_quarter, iq_i, iq_q);
         for (int n = 0; n < IQ_SAMPLES_PER_FRAME; n++) {
             double tx_scale = cfg->tx_amplitude == 0.0 ? 1.0 : cfg->tx_amplitude;
             uint8_t pair[2] = {
@@ -562,10 +709,12 @@ static int run_iq_file(Config *cfg, FILE *pcm_fp) {
             if (fwrite(pair, 1, 2, out) != 2) {
                 perror("fwrite");
                 fclose(out);
+                rrc_free(&shaper);
                 return 1;
             }
         }
     }
+    rrc_free(&shaper);
     fclose(out);
     return 0;
 }
@@ -678,6 +827,19 @@ int main(int argc, char **argv) {
 
     J17Filter j17;
     j17_init(&j17);
+    RrcShaper shaper;
+    if (rrc_init(&shaper, cfg.pulse_shape, (int)(cfg.sample_rate / SYMBOL_RATE),
+                 cfg.pulse_rolloff, cfg.pulse_span_symbols) < 0) {
+        fprintf(stderr, "Kan RRC pulse shaper niet initialiseren\n");
+        free(iq_i);
+        free(iq_q);
+        iio_buffer_destroy(buf);
+        iio_context_destroy(ctx);
+        if (pcm_fp != stdin) {
+            fclose(pcm_fp);
+        }
+        return 1;
+    }
     int phase_quarter = 0;
     long long buffers_sent = 0;
     long long frames_sent = 0;
@@ -697,7 +859,7 @@ int main(int argc, char **argv) {
         }
 
         for (size_t f = 0; f < frames_this; f++) {
-            generate_frame(&cfg, pcm_fp, &j17, frames_sent + (long long)f, &phase_quarter,
+            generate_frame(&cfg, pcm_fp, &j17, &shaper, frames_sent + (long long)f, &phase_quarter,
                            iq_i + f * IQ_SAMPLES_PER_FRAME, iq_q + f * IQ_SAMPLES_PER_FRAME);
         }
         for (size_t f = frames_this; f < cfg.buffer_frames; f++) {
@@ -751,6 +913,7 @@ int main(int argc, char **argv) {
 
     free(iq_i);
     free(iq_q);
+    rrc_free(&shaper);
     iio_buffer_destroy(buf);
     iio_context_destroy(ctx);
     if (pcm_fp != stdin) {

@@ -152,7 +152,12 @@ if [[ "${NICAM_TX_BACKEND}" == "c-native" ]]; then
     --rf-bandwidth "${NICAM_TX_RF_BANDWIDTH}"
     --tx-amplitude "${NICAM_TX_AMPLITUDE}"
     --nicam-rf-level "${NICAM_TX_RF_LEVEL}"
+    --pulse-rolloff "${NICAM_TX_PULSE_ROLLOFF}"
+    --pulse-span-symbols "${NICAM_TX_PULSE_SPAN_SYMBOLS}"
   )
+  if [[ "${NICAM_TX_PULSE_SHAPE}" == "0" ]]; then
+    native_args+=(--no-pulse-shape)
+  fi
   if [[ -n "${NICAM_TX_STATION_ID}" ]]; then
     native_args+=(--station-id "${NICAM_TX_STATION_ID}")
   fi
