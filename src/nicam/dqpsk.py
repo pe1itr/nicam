@@ -62,6 +62,115 @@ def upsample_symbols(symbols: np.ndarray, sample_rate: int) -> np.ndarray:
     return np.repeat(np.asarray(symbols, dtype=np.complex64), sps)
 
 
+def raised_cosine_taps(samples_per_symbol: int, rolloff: float, span_symbols: int) -> np.ndarray:
+    if samples_per_symbol <= 0:
+        raise ValueError("samples_per_symbol must be positive")
+    beta = float(rolloff)
+    if beta < 0.0 or beta > 1.0:
+        raise ValueError("rolloff must be between 0 and 1")
+    span = max(2, int(span_symbols))
+    if span % 2:
+        span += 1
+
+    half = span * samples_per_symbol // 2
+    t = np.arange(-half, half + 1, dtype=np.float64) / float(samples_per_symbol)
+    taps = np.empty_like(t)
+    for idx, value in enumerate(t):
+        if abs(value) < 1e-12:
+            taps[idx] = 1.0
+        elif beta > 0.0 and abs(abs(2.0 * beta * value) - 1.0) < 1e-12:
+            taps[idx] = (np.pi / 4.0) * np.sinc(1.0 / (2.0 * beta))
+        else:
+            denom = 1.0 - (2.0 * beta * value) ** 2
+            taps[idx] = np.sinc(value) * np.cos(np.pi * beta * value) / denom
+    taps /= np.sum(taps)
+    return taps.astype(np.float32)
+
+
+def root_raised_cosine_taps(
+    samples_per_symbol: int, rolloff: float, span_symbols: int
+) -> np.ndarray:
+    if samples_per_symbol <= 0:
+        raise ValueError("samples_per_symbol must be positive")
+    beta = float(rolloff)
+    if beta < 0.0 or beta > 1.0:
+        raise ValueError("rolloff must be between 0 and 1")
+    span = max(2, int(span_symbols))
+    if span % 2:
+        span += 1
+
+    half = span * samples_per_symbol // 2
+    t = np.arange(-half, half + 1, dtype=np.float64) / float(samples_per_symbol)
+    taps = np.empty_like(t)
+
+    if beta == 0.0:
+        taps = np.sinc(t)
+    else:
+        for idx, value in enumerate(t):
+            if abs(value) < 1e-12:
+                taps[idx] = 1.0 + beta * (4.0 / np.pi - 1.0)
+            elif abs(abs(4.0 * beta * value) - 1.0) < 1e-12:
+                angle = np.pi / (4.0 * beta)
+                taps[idx] = (
+                    beta
+                    / np.sqrt(2.0)
+                    * (
+                        (1.0 + 2.0 / np.pi) * np.sin(angle)
+                        + (1.0 - 2.0 / np.pi) * np.cos(angle)
+                    )
+                )
+            else:
+                numerator = (
+                    np.sin(np.pi * value * (1.0 - beta))
+                    + 4.0 * beta * value * np.cos(np.pi * value * (1.0 + beta))
+                )
+                denominator = np.pi * value * (1.0 - (4.0 * beta * value) ** 2)
+                taps[idx] = numerator / denominator
+
+    taps /= np.sum(taps)
+    return taps.astype(np.float32)
+
+
+def shape_symbols(
+    symbols: np.ndarray,
+    sample_rate: int,
+    rolloff: float = 0.4,
+    span_symbols: int = 6,
+) -> np.ndarray:
+    samples_per_symbol = sample_rate / SYMBOL_RATE
+    if abs(samples_per_symbol - round(samples_per_symbol)) > 1e-9:
+        raise ValueError("sample_rate must be an integer multiple of 364000")
+    sps = int(round(samples_per_symbol))
+    data = np.asarray(symbols, dtype=np.complex64)
+    upsampled = np.zeros(data.size * sps, dtype=np.complex64)
+    upsampled[::sps] = data * sps
+    taps = root_raised_cosine_taps(sps, rolloff, span_symbols)
+    shaped = np.convolve(upsampled, taps.astype(np.complex64), mode="same")
+    return shaped.astype(np.complex64, copy=False)
+
+
+def lowpass_fir_taps(sample_rate: int, cutoff_hz: float, taps: int) -> np.ndarray:
+    count = max(3, int(taps))
+    if count % 2 == 0:
+        count += 1
+    cutoff = float(cutoff_hz)
+    if cutoff <= 0.0 or cutoff >= sample_rate / 2.0:
+        raise ValueError("cutoff_hz must be between 0 and Nyquist")
+    n = np.arange(count, dtype=np.float64) - (count - 1) / 2.0
+    fc = cutoff / float(sample_rate)
+    coeff = 2.0 * fc * np.sinc(2.0 * fc * n)
+    coeff *= np.hamming(count)
+    coeff /= np.sum(coeff)
+    return coeff.astype(np.float32)
+
+
+def filter_baseband(iq: np.ndarray, sample_rate: int, cutoff_hz: float, taps: int) -> np.ndarray:
+    coeff = lowpass_fir_taps(sample_rate, cutoff_hz, taps)
+    data = np.asarray(iq, dtype=np.complex64)
+    out = np.convolve(data, coeff.astype(np.complex64), mode="same")
+    return out.astype(np.complex64, copy=False)
+
+
 def coarse_symbols_from_samples(
     iq: np.ndarray,
     sample_rate: int,
