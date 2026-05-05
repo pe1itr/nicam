@@ -16,6 +16,8 @@ PYTHON_BIN="${PYTHON_BIN:-python3}"
 VENV_PATH="${VENV_PATH:-${REPO_DIR}/.venv}"
 AUDIO_BACKEND="${AUDIO_BACKEND:-stdout}"
 AUDIO_DEVICE="${AUDIO_DEVICE:-default}"
+AUDIO_BUFFER_TIME="${AUDIO_BUFFER_TIME:-}"
+AUDIO_PERIOD_TIME="${AUDIO_PERIOD_TIME:-}"
 
 if [[ "${PYTHON_MODE}" == "venv" ]]; then
   if [[ ! -x "${VENV_PATH}/bin/python" && -n "${VIRTUAL_ENV:-}" && -x "${VIRTUAL_ENV}/bin/python" ]]; then
@@ -62,7 +64,14 @@ audio_player() {
         -f s16le -sample_rate "${rate}" -ch_layout stereo -i -
       ;;
     aplay)
-      aplay -q -f S16_LE -r "${rate}" -c 2 -D "${AUDIO_DEVICE}"
+      local aplay_args=(-q -f S16_LE -r "${rate}" -c 2 -D "${AUDIO_DEVICE}")
+      if [[ -n "${AUDIO_BUFFER_TIME}" ]]; then
+        aplay_args+=(--buffer-time="${AUDIO_BUFFER_TIME}")
+      fi
+      if [[ -n "${AUDIO_PERIOD_TIME}" ]]; then
+        aplay_args+=(--period-time="${AUDIO_PERIOD_TIME}")
+      fi
+      aplay "${aplay_args[@]}"
       ;;
     none)
       cat >/dev/null
@@ -100,6 +109,7 @@ run_nicam_rx() {
   local matched_filter=0
   local matched_rolloff=0.4
   local matched_span_symbols=6
+  local nicam_extra=()
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
@@ -123,6 +133,10 @@ run_nicam_rx() {
         matched_rolloff="$2"; shift 2 ;;
       --matched-span-symbols)
         matched_span_symbols="$2"; shift 2 ;;
+      --adaptive-fixed|--bitstream-quality|--matched-filter|--allow-unsupported-modes)
+        nicam_extra+=("$1"); shift ;;
+      --timing-search-steps|--chunk-bytes|--carrier-search-hz|--carrier-search-step-hz|--conceal-mode|--stats-every|--frontend-lowpass-hz|--adaptive-costas-alpha|--adaptive-gain-mu|--adaptive-omega-relative-limit|--ram-read-start|--ram-read-stride|--max-parity-errors|--max-pcm-step|--lock-max-parity-errors|--lock-confirm-frames|--lock-drop-frames|--max-bad-frames|--conceal-bad-frames|--scramble-phase)
+        nicam_extra+=("$1" "$2"); shift 2 ;;
       --verbose)
         verbose=1; shift ;;
       --help|-h)
@@ -148,6 +162,7 @@ run_nicam_rx() {
   if [[ "${verbose}" != "0" ]]; then
     nicam_args+=(--verbose)
   fi
+  nicam_args+=("${nicam_extra[@]}")
 
   if [[ -n "${freq}" ]]; then
     local rtl_args=(
