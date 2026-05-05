@@ -59,7 +59,7 @@ Old fixed slicer on first 1 MiB:
 
 ```sh
 dd if=nicam.iq of=/tmp/nicam-s16-head1m.iq bs=1048576 count=1 status=none
-./nicam --iq-format s16 --sample-rate 1456000 --bitstream-quality \
+./nicam-rx --iq-format s16 --sample-rate 1456000 --bitstream-quality \
   < /tmp/nicam-s16-head1m.iq \
   > /tmp/nicam-old-head1m.pcm \
   2> /tmp/nicam-old-head1m.err
@@ -75,7 +75,7 @@ quality: q_hist=2021/2140/1981/2594 delta_hist=2374/2151/2005/2205
 New adaptive demod on first 1 MiB:
 
 ```sh
-./nicam --iq-format s16 --sample-rate 1456000 --adaptive-demod --bitstream-quality \
+./nicam-rx --iq-format s16 --sample-rate 1456000 --adaptive-demod --bitstream-quality \
   < /tmp/nicam-s16-head1m.iq \
   > /tmp/nicam-adapt-head1m.pcm \
   2> /tmp/nicam-adapt-head1m.err
@@ -98,7 +98,7 @@ late chunk: raw_faw_hits=32/32 raw_faw_error_sum=0
 Fast fixed adaptive mode over the full file:
 
 ```sh
-./nicam --iq-format s16 --sample-rate 1456000 --adaptive-fixed --timing-search-steps 1 --bitstream-quality \
+./nicam-rx --iq-format s16 --sample-rate 1456000 --adaptive-fixed --timing-search-steps 1 --bitstream-quality \
   < nicam.iq \
   > /tmp/nicam-adapt-fixed-full.pcm \
   2> /tmp/nicam-adapt-fixed-full.err
@@ -122,7 +122,7 @@ control-bit interpretation now pass on the first MiB of `nicam.iq`.
 Command:
 
 ```sh
-./nicam --iq-format s16 --sample-rate 1456000 --adaptive-fixed --timing-search-steps 1 --bitstream-quality \
+./nicam-rx --iq-format s16 --sample-rate 1456000 --adaptive-fixed --timing-search-steps 1 --bitstream-quality \
   < /tmp/nicam-s16-head1m.iq \
   > /tmp/nicam-body-step-head2.pcm \
   2> /tmp/nicam-body-step-head2.err
@@ -176,7 +176,7 @@ Audio output is now integrated into the adaptive path. Without
 Command:
 
 ```sh
-./nicam --iq-format s16 --sample-rate 1456000 --adaptive-fixed --timing-search-steps 1 \
+./nicam-rx --iq-format s16 --sample-rate 1456000 --adaptive-fixed --timing-search-steps 1 \
   < nicam.iq \
   > /tmp/nicam-adaptive-full.pcm \
   2> /tmp/nicam-adaptive-full.err
@@ -218,7 +218,7 @@ Working live audio pipeline:
 ```sh
 cd /home/rhardenb/repos/sdr-dvb-pipelines
 
-./afedri-udp.py | /home/rhardenb/repo-prop/nicam-transmitter/nicam \
+./afedri-udp.py | /home/rhardenb/repo-prop/nicam-transmitter/nicam-rx \
   --iq-format s16 \
   --sample-rate 1456000 \
   --adaptive-fixed \

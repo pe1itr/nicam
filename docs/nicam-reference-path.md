@@ -10,7 +10,7 @@ Run from the AFEDRI pipeline checkout:
 ```sh
 cd /home/rhardenb/repos/sdr-dvb-pipelines
 
-./afedri-udp.py | /home/rhardenb/repo-prop/nicam-transmitter/nicam \
+./afedri-udp.py | /home/rhardenb/repo-prop/nicam-transmitter/nicam-rx \
   --iq-format s16 \
   --sample-rate 1456000 \
   --adaptive-fixed \
@@ -31,7 +31,7 @@ diagnostics to stderr and does not affect the PCM stream.
 - Input sample rate: `1456000` samples/s.
 - NICAM symbol rate: `364000` symbols/s.
 - Samples per symbol: `4`.
-- Decoder path: C decoder `./nicam`.
+- Decoder path: C decoder `./nicam-rx`.
 - Demod mode: `--adaptive-fixed`.
 - Timing search: `--timing-search-steps 1`.
 - Live chunk size: `--chunk-bytes 8192`.

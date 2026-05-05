@@ -20,7 +20,7 @@ Run from the AFEDRI pipeline checkout:
 ```sh
 cd /home/rhardenb/repos/sdr-dvb-pipelines
 
-./afedri-udp.py | /home/rhardenb/repo-prop/nicam-transmitter/nicam \
+./afedri-udp.py | /home/rhardenb/repo-prop/nicam-transmitter/nicam-rx \
   --iq-format s16 \
   --sample-rate 1456000 \
   --adaptive-fixed \
@@ -81,7 +81,7 @@ For live debugging, add `--stats-every N`. Statistics are written on stderr and
 do not corrupt the PCM stream:
 
 ```sh
-./afedri-udp.py | /home/rhardenb/repo-prop/nicam-transmitter/nicam \
+./afedri-udp.py | /home/rhardenb/repo-prop/nicam-transmitter/nicam-rx \
   --iq-format s16 \
   --sample-rate 1456000 \
   --adaptive-fixed \

@@ -7,7 +7,7 @@ C-zender voor PlutoSDR en een standalone C-ontvanger voor live RTL-SDR
 ontvangst.
 
 De NICAM Python-prototypes zijn uitgefaseerd; de normale NICAM TX/RX-paden
-lopen via de C-programma's `nicam-pluto-tx` en `nicam`.
+lopen via de C-programma's `nicam-pluto-tx` en `nicam-rx`.
 
 ## Signaalparameters
 
@@ -26,18 +26,18 @@ symbool. Dat houdt de timing in deze experimentele versie eenvoudig.
 ## Standalone C-ontvanger
 
 Voor live gebruik op de Odroid is er een standalone C-programma met de naam
-`nicam`. Dit programma heeft geen Python nodig tijdens runtime:
+`nicam-rx`. Dit programma heeft geen Python nodig tijdens runtime:
 
 - stdin: `rtl_sdr`-achtige unsigned 8-bit IQ (`I,Q,I,Q,...`)
 - stdout: raw stereo `s16le` audio op `32 kHz`
 - stderr: lock/statusmeldingen bij `--verbose`
 
-Standaard verwacht `./nicam` `rtl_sdr`-compatibele `u8` IQ. Voor andere SDR
+Standaard verwacht `./nicam-rx` `rtl_sdr`-compatibele `u8` IQ. Voor andere SDR
 hardware of offline bestanden kan ook interleaved signed 16-bit IQ worden
 gelezen:
 
 ```sh
-./nicam --iq-format s16 --sample-rate 1456000 < input.cs16 > output.pcm
+./nicam-rx --iq-format s16 --sample-rate 1456000 < input.cs16 > output.pcm
 ```
 
 Compileren:
@@ -49,7 +49,7 @@ make
 Dit bouwt:
 
 ```sh
-./nicam
+./nicam-rx
 ```
 
 De Makefile gebruikt alleen een C compiler en `libm`. Op Debian/Ubuntu/Odroid:
@@ -66,7 +66,7 @@ Live luisteren met RTL-SDR en ALSA:
 
 ```sh
 rtl_sdr -f 54552000 -s 1456000 -g 29.7 - \
-  | ./nicam --sample-rate 1456000 --verbose \
+  | ./nicam-rx --sample-rate 1456000 --verbose \
   | aplay -f S16_LE -r 32000 -c 2
 ```
 
@@ -81,7 +81,7 @@ Als je liever via `ffplay` luistert:
 
 ```sh
 rtl_sdr -f 54552000 -s 1456000 -g 29.7 - \
-  | ./nicam --sample-rate 1456000 --verbose \
+  | ./nicam-rx --sample-rate 1456000 --verbose \
   | ffplay -hide_banner -loglevel error -nodisp \
       -f s16le -sample_rate 32000 -ch_layout stereo -i -
 ```
@@ -94,7 +94,7 @@ Voor het upconverter-testplan:
 - RTL-SDR op `54.552 MHz`
 
 De C-decoder is getest tegen dezelfde IQ-bestanden als de Python ontvanger. Op
-een 30 seconden 10 dB SNR testbestand gaf `./nicam` exact dezelfde audio-samples
+een 30 seconden 10 dB SNR testbestand gaf `./nicam-rx` exact dezelfde audio-samples
 als de Python ontvanger en decodeerde hij ongeveer in real-time factor 30
 sneller dan nodig.
 
@@ -128,7 +128,7 @@ systeem.
 
 ## C ontvanger starten
 
-Voor NICAM RX is `./nicam` de enige ondersteunde decoder. Live luisteren via
+Voor NICAM RX is `./nicam-rx` de enige ondersteunde decoder. Live luisteren via
 RTL-SDR loopt via de host-launcher:
 
 ```sh
@@ -138,7 +138,7 @@ NICAM_RX_GAIN=29.7 NICAM_RX_MATCHED_FILTER=1 tools/websdr-nicam-rx
 Een opgeslagen IQ-bestand terugluisteren:
 
 ```sh
-./nicam --sample-rate 1456000 --matched-filter < /tmp/radio2-nicam.iq \
+./nicam-rx --sample-rate 1456000 --matched-filter < /tmp/radio2-nicam.iq \
   | aplay -f S16_LE -r 32000 -c 2
 ```
 
@@ -188,7 +188,7 @@ ffmpeg -hide_banner -loglevel error -reconnect 1 -reconnect_streamed 1 -reconnec
 Met de C-decoder kun je hetzelfde IQ-bestand terugluisteren:
 
 ```sh
-./nicam --sample-rate 1456000 --matched-filter --verbose < /tmp/radio2-nicam.iq \
+./nicam-rx --sample-rate 1456000 --matched-filter --verbose < /tmp/radio2-nicam.iq \
   | aplay -f S16_LE -r 32000 -c 2
 ```
 
@@ -208,7 +208,7 @@ NICAM_TX_SOURCE=udp NICAM_TX_UDP_URL=udp://0.0.0.0:7355 tools/tim-nicam-tx
 Digital Baseband V1.4-compatible station-ID in de NICAM additional-data bits:
 
 ```sh
-NICAM_TX_STATION_ID=PE1MUD tools/tim-nicam-tx
+NICAM_TX_STATION_ID=PE1ITR tools/tim-nicam-tx
 ```
 
 Alleen de eerste 8 ASCII-tekens worden gebruikt. De mapping is:
@@ -290,7 +290,7 @@ Voor een korte offline test kun je eerst IQ maken:
 
 ```sh
 ./nicam-pluto-tx --source tone --seconds 1 --iq-out /tmp/nicam-tone.iq
-./nicam --sample-rate 1456000 --matched-filter < /tmp/nicam-tone.iq > /tmp/nicam-tone.pcm
+./nicam-rx --sample-rate 1456000 --matched-filter < /tmp/nicam-tone.iq > /tmp/nicam-tone.pcm
 ```
 
 ## WBFM-zender
@@ -520,7 +520,8 @@ tussen Pluto en RTL-SDR het meest reproduceerbaar.
 
 ## RTL-SDR audio terugontvangen
 
-`tools/nicam-run nicam-rx` start `rtl_sdr` en pipe't de samples naar `./nicam`:
+`tools/nicam-run nicam-rx` start `rtl_sdr` en pipe't de samples naar
+`./nicam-rx`:
 
 ```sh
 tools/nicam-run nicam-rx \
@@ -540,7 +541,8 @@ AUDIO_BACKEND=ffplay tools/nicam-run nicam-rx \
 ```
 
 Als de zender een Digital Baseband V1.4-compatible station-ID meestuurt, print
-`./nicam-rx` de gestabiliseerde waarde op stderr als `station_id=...`.
+`./nicam-rx` de gestabiliseerde waarde op stderr als `station_id=...`. Met
+`--stats-every N` staat dezelfde waarde ook in de periodieke `nicam_stats` regel.
 
 ## Testen zonder SDR's
 
@@ -574,7 +576,7 @@ Maak een synthetisch direct-DQPSK IQ-bestand met de C-zender:
 
 ```sh
 ./nicam-pluto-tx --source tone --seconds 1 --iq-out /tmp/nicam-test.iq
-./nicam --sample-rate 1456000 < /tmp/nicam-test.iq > /tmp/nicam-test.pcm
+./nicam-rx --sample-rate 1456000 < /tmp/nicam-test.iq > /tmp/nicam-test.pcm
 ```
 
 ## Pluto-zender
@@ -635,7 +637,7 @@ Uitzetten: verwijder deze `Environment=EXTRA_RX_ARGS=...` regel weer (of maak he
 
 Waar zie je het:
 
-- In foreground/terminal: op `stderr` van `./nicam`
+- In foreground/terminal: op `stderr` van `./nicam-rx`
 - Als systemd user-service: via `journalctl --user -u nicam-rx.service -f`
 
 Voorbeeldregel:
