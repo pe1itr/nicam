@@ -65,13 +65,7 @@ Prefer checkout-relative venv paths:
 NICAM RX status without audio playback:
 
 ```sh
-AUDIO_BACKEND=none NICAM_RX_GAIN=29.7 tools/websdr-nicam-rx --verbose --rf-snr --rf-snr-interval 1
-```
-
-NICAM RX with frequency offset:
-
-```sh
-AUDIO_BACKEND=none NICAM_RX_GAIN=29.7 NICAM_RX_FREQ_OFFSET=-2900 tools/websdr-nicam-rx --verbose --rf-snr
+AUDIO_BACKEND=none NICAM_RX_GAIN=29.7 NICAM_RX_MATCHED_FILTER=1 tools/websdr-nicam-rx --verbose
 ```
 
 WBFM RX squelch/status:

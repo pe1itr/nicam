@@ -17,9 +17,12 @@ audio:
   input_file: "test_audio/voorbeeld.wav"
   device: null
   stream_url: null
+  udp_url: "udp://0.0.0.0:7355"
   stream_reconnect: true
   stream_silence_on_stall: true
   stream_reconnect_delay_s: 2.0
+  read_timeout_ms: 120
+  buffer_ms: 1200
   gain: 1.0
   audio_rate_hz: 48000
   mpx_rate_hz: 240000

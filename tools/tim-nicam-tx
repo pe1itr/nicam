@@ -19,187 +19,75 @@ NICAM_TX_GAIN_DB="${NICAM_TX_GAIN_DB:--10}"
 NICAM_TX_SAMPLE_RATE="${NICAM_TX_SAMPLE_RATE:-1456000}"
 NICAM_TX_RF_BANDWIDTH="${NICAM_TX_RF_BANDWIDTH:-750000}"
 NICAM_TX_AMPLITUDE="${NICAM_TX_AMPLITUDE:-0.8}"
-NICAM_TX_BASEBAND_AMPLITUDE="${NICAM_TX_BASEBAND_AMPLITUDE:-}"
 NICAM_TX_RF_LEVEL="${NICAM_TX_RF_LEVEL:-200}"
-NICAM_TX_LEVEL_DB="${NICAM_TX_LEVEL_DB:-}"
 NICAM_TX_SOURCE="${NICAM_TX_SOURCE:-stream}"
 NICAM_TX_STREAM_URL="${NICAM_TX_STREAM_URL:-https://icecast.omroep.nl/radio2-bb-aac}"
 NICAM_TX_AUDIO_FILE="${NICAM_TX_AUDIO_FILE:-}"
-NICAM_TX_AUDIO_DEVICE="${NICAM_TX_AUDIO_DEVICE:-}"
 NICAM_TX_UDP_URL="${NICAM_TX_UDP_URL:-udp://0.0.0.0:7355}"
 NICAM_TX_PULSE_SHAPE="${NICAM_TX_PULSE_SHAPE:-1}"
 NICAM_TX_PULSE_ROLLOFF="${NICAM_TX_PULSE_ROLLOFF:-0.4}"
 NICAM_TX_PULSE_SPAN_SYMBOLS="${NICAM_TX_PULSE_SPAN_SYMBOLS:-6}"
-NICAM_TX_BASEBAND_FILTER="${NICAM_TX_BASEBAND_FILTER:-0}"
-NICAM_TX_BASEBAND_FILTER_CUTOFF="${NICAM_TX_BASEBAND_FILTER_CUTOFF:-425000}"
-NICAM_TX_BASEBAND_FILTER_TAPS="${NICAM_TX_BASEBAND_FILTER_TAPS:-49}"
 NICAM_TX_STATION_ID="${NICAM_TX_STATION_ID:-}"
 NICAM_TX_PCM_TIMEOUT_MS="${NICAM_TX_PCM_TIMEOUT_MS:-120}"
-NICAM_TX_EXTRA_ARGS="${NICAM_TX_EXTRA_ARGS:-}"
 NICAM_PLUTO_EXTRA_ARGS="${NICAM_PLUTO_EXTRA_ARGS:-}"
-NICAM_TX_DIRECT="${NICAM_TX_DIRECT:-0}"
-NICAM_DIRECT_EXTRA_ARGS="${NICAM_DIRECT_EXTRA_ARGS:-}"
-NICAM_TX_BACKEND="${NICAM_TX_BACKEND:-pyadi}"
 
-tx_args=(
-  module
-  nicam.stream_tx
+echo "tim-nicam-tx: env=${ENV_FILE} lo=${NICAM_TX_LO_HZ} Hz gain=${NICAM_TX_GAIN_DB} source=${NICAM_TX_SOURCE} rf_level=${NICAM_TX_RF_LEVEL}" >&2
+
+if [[ ! -x "${REPO_DIR}/nicam-pluto-tx" ]]; then
+  echo "tim-nicam-tx: bouw eerst ${REPO_DIR}/nicam-pluto-tx met tools/build-nicam-pluto-tx" >&2
+  exit 2
+fi
+
+native_args=(
+  --lo "${NICAM_TX_LO_HZ}"
   --sample-rate "${NICAM_TX_SAMPLE_RATE}"
-  --ffmpeg-reconnect
+  --tx-gain "${NICAM_TX_GAIN_DB}"
+  --rf-bandwidth "${NICAM_TX_RF_BANDWIDTH}"
+  --tx-amplitude "${NICAM_TX_AMPLITUDE}"
+  --nicam-rf-level "${NICAM_TX_RF_LEVEL}"
+  --pulse-rolloff "${NICAM_TX_PULSE_ROLLOFF}"
+  --pulse-span-symbols "${NICAM_TX_PULSE_SPAN_SYMBOLS}"
+  --pcm-timeout-ms "${NICAM_TX_PCM_TIMEOUT_MS}"
 )
-
-if [[ "${NICAM_TX_PULSE_SHAPE}" != "0" ]]; then
-  tx_args+=(
-    --pulse-shape
-    --pulse-rolloff "${NICAM_TX_PULSE_ROLLOFF}"
-    --pulse-span-symbols "${NICAM_TX_PULSE_SPAN_SYMBOLS}"
-  )
+if [[ "${NICAM_TX_PULSE_SHAPE}" == "0" ]]; then
+  native_args+=(--no-pulse-shape)
 fi
-
-if [[ "${NICAM_TX_BASEBAND_FILTER}" != "0" ]]; then
-  tx_args+=(
-    --baseband-filter
-    --baseband-filter-cutoff "${NICAM_TX_BASEBAND_FILTER_CUTOFF}"
-    --baseband-filter-taps "${NICAM_TX_BASEBAND_FILTER_TAPS}"
-  )
-fi
-
-if [[ -n "${NICAM_TX_BASEBAND_AMPLITUDE}" ]]; then
-  tx_args+=(--amplitude "${NICAM_TX_BASEBAND_AMPLITUDE}")
-elif [[ -n "${NICAM_TX_LEVEL_DB}" ]]; then
-  tx_args+=(--nicam-level-db "${NICAM_TX_LEVEL_DB}")
-else
-  tx_args+=(--nicam-rf-level "${NICAM_TX_RF_LEVEL}")
-fi
-
 if [[ -n "${NICAM_TX_STATION_ID}" ]]; then
-  tx_args+=(--station-id "${NICAM_TX_STATION_ID}")
+  native_args+=(--station-id "${NICAM_TX_STATION_ID}")
 fi
 
 case "${NICAM_TX_SOURCE}" in
+  tone)
+    exec "${REPO_DIR}/nicam-pluto-tx" "${native_args[@]}" --source tone ${NICAM_PLUTO_EXTRA_ARGS} "$@"
+    ;;
+  silence)
+    exec "${REPO_DIR}/nicam-pluto-tx" "${native_args[@]}" --source silence ${NICAM_PLUTO_EXTRA_ARGS} "$@"
+    ;;
   stream)
-    tx_args+=(--stream-url "${NICAM_TX_STREAM_URL}")
+    ffmpeg_args=(-hide_banner -loglevel error -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5)
+    ffmpeg_args+=(-i "${NICAM_TX_STREAM_URL}" -vn -f s16le -ac 2 -ar 32000 -)
+    ffmpeg "${ffmpeg_args[@]}" \
+      | "${REPO_DIR}/nicam-pluto-tx" "${native_args[@]}" --source pcm --pcm-in - ${NICAM_PLUTO_EXTRA_ARGS} "$@"
+    exit $?
     ;;
   file)
     if [[ -z "${NICAM_TX_AUDIO_FILE}" ]]; then
       echo "tim-nicam-tx: NICAM_TX_AUDIO_FILE is verplicht bij NICAM_TX_SOURCE=file" >&2
       exit 2
     fi
-    tx_args+=(--audio-file "${NICAM_TX_AUDIO_FILE}")
-    ;;
-  device)
-    if [[ -n "${NICAM_TX_AUDIO_DEVICE}" ]]; then
-      tx_args+=(--audio-device "${NICAM_TX_AUDIO_DEVICE}")
-    else
-      tx_args+=(--audio-device default)
-    fi
+    ffmpeg_args=(-hide_banner -loglevel error -i "${NICAM_TX_AUDIO_FILE}" -vn -f s16le -ac 2 -ar 32000 -)
+    ffmpeg "${ffmpeg_args[@]}" \
+      | "${REPO_DIR}/nicam-pluto-tx" "${native_args[@]}" --source pcm --pcm-in - ${NICAM_PLUTO_EXTRA_ARGS} "$@"
+    exit $?
     ;;
   udp)
-    tx_args+=(--udp-url "${NICAM_TX_UDP_URL}")
-    ;;
-  silence)
-    tx_args+=(--silence)
-    ;;
-  tone)
-    tx_args+=(--tone)
+    ffmpeg_args=(-hide_banner -loglevel error -f s16le -ac 2 -ar 32000 -i "${NICAM_TX_UDP_URL}" -vn -f s16le -ac 2 -ar 32000 -)
+    ffmpeg "${ffmpeg_args[@]}" \
+      | "${REPO_DIR}/nicam-pluto-tx" "${native_args[@]}" --source pcm --pcm-in - ${NICAM_PLUTO_EXTRA_ARGS} "$@"
+    exit $?
     ;;
   *)
-    echo "tim-nicam-tx: onbekende NICAM_TX_SOURCE=${NICAM_TX_SOURCE}" >&2
+    echo "tim-nicam-tx: C-zender ondersteunt tone, silence, stream, file en udp" >&2
     exit 2
     ;;
 esac
-
-echo "tim-nicam-tx: env=${ENV_FILE} lo=${NICAM_TX_LO_HZ} Hz gain=${NICAM_TX_GAIN_DB} source=${NICAM_TX_SOURCE} rf_level=${NICAM_TX_RF_LEVEL}" >&2
-
-if [[ "${NICAM_TX_DIRECT}" != "0" ]]; then
-  direct_args=(
-    module
-    nicam.pluto_stream_tx
-    "${tx_args[@]:2}"
-    --lo "${NICAM_TX_LO_HZ}"
-    --tx-gain "${NICAM_TX_GAIN_DB}"
-    --rf-bandwidth "${NICAM_TX_RF_BANDWIDTH}"
-    --pluto-amplitude "${NICAM_TX_AMPLITUDE}"
-  )
-  exec "${REPO_DIR}/tools/nicam-run" "${direct_args[@]}" ${NICAM_TX_EXTRA_ARGS} ${NICAM_DIRECT_EXTRA_ARGS} "$@"
-fi
-
-if [[ "${NICAM_TX_BACKEND}" == "c-iio" ]]; then
-  if [[ ! -x "${REPO_DIR}/nicam-pluto-u8-tx" ]]; then
-    echo "tim-nicam-tx: bouw eerst ${REPO_DIR}/nicam-pluto-u8-tx met tools/build-nicam-pluto-u8-tx" >&2
-    exit 2
-  fi
-  "${REPO_DIR}/tools/nicam-run" "${tx_args[@]}" ${NICAM_TX_EXTRA_ARGS} "$@" \
-    | "${REPO_DIR}/nicam-pluto-u8-tx" \
-        --lo "${NICAM_TX_LO_HZ}" \
-        --sample-rate "${NICAM_TX_SAMPLE_RATE}" \
-        --tx-gain "${NICAM_TX_GAIN_DB}" \
-        --rf-bandwidth "${NICAM_TX_RF_BANDWIDTH}" \
-        --amplitude "${NICAM_TX_AMPLITUDE}" \
-        ${NICAM_PLUTO_EXTRA_ARGS}
-  exit $?
-fi
-
-if [[ "${NICAM_TX_BACKEND}" == "c-native" ]]; then
-  if [[ ! -x "${REPO_DIR}/nicam-pluto-tx" ]]; then
-    echo "tim-nicam-tx: bouw eerst ${REPO_DIR}/nicam-pluto-tx met tools/build-nicam-pluto-tx" >&2
-    exit 2
-  fi
-
-  native_args=(
-    --lo "${NICAM_TX_LO_HZ}"
-    --sample-rate "${NICAM_TX_SAMPLE_RATE}"
-    --tx-gain "${NICAM_TX_GAIN_DB}"
-    --rf-bandwidth "${NICAM_TX_RF_BANDWIDTH}"
-    --tx-amplitude "${NICAM_TX_AMPLITUDE}"
-    --nicam-rf-level "${NICAM_TX_RF_LEVEL}"
-    --pulse-rolloff "${NICAM_TX_PULSE_ROLLOFF}"
-    --pulse-span-symbols "${NICAM_TX_PULSE_SPAN_SYMBOLS}"
-    --pcm-timeout-ms "${NICAM_TX_PCM_TIMEOUT_MS}"
-  )
-  if [[ "${NICAM_TX_PULSE_SHAPE}" == "0" ]]; then
-    native_args+=(--no-pulse-shape)
-  fi
-  if [[ -n "${NICAM_TX_STATION_ID}" ]]; then
-    native_args+=(--station-id "${NICAM_TX_STATION_ID}")
-  fi
-
-  case "${NICAM_TX_SOURCE}" in
-    tone)
-      exec "${REPO_DIR}/nicam-pluto-tx" "${native_args[@]}" --source tone ${NICAM_PLUTO_EXTRA_ARGS} "$@"
-      ;;
-    silence)
-      exec "${REPO_DIR}/nicam-pluto-tx" "${native_args[@]}" --source silence ${NICAM_PLUTO_EXTRA_ARGS} "$@"
-      ;;
-    stream)
-      ffmpeg_args=(-hide_banner -loglevel error -reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5)
-      ffmpeg_args+=(-i "${NICAM_TX_STREAM_URL}" -vn -f s16le -ac 2 -ar 32000 -)
-      ffmpeg "${ffmpeg_args[@]}" \
-        | "${REPO_DIR}/nicam-pluto-tx" "${native_args[@]}" --source pcm --pcm-in - ${NICAM_PLUTO_EXTRA_ARGS} "$@"
-      exit $?
-      ;;
-    file)
-      if [[ -z "${NICAM_TX_AUDIO_FILE}" ]]; then
-        echo "tim-nicam-tx: NICAM_TX_AUDIO_FILE is verplicht bij NICAM_TX_SOURCE=file" >&2
-        exit 2
-      fi
-      ffmpeg_args=(-hide_banner -loglevel error -i "${NICAM_TX_AUDIO_FILE}" -vn -f s16le -ac 2 -ar 32000 -)
-      ffmpeg "${ffmpeg_args[@]}" \
-        | "${REPO_DIR}/nicam-pluto-tx" "${native_args[@]}" --source pcm --pcm-in - ${NICAM_PLUTO_EXTRA_ARGS} "$@"
-      exit $?
-      ;;
-    *)
-      echo "tim-nicam-tx: NICAM_TX_BACKEND=c-native ondersteunt nu tone, silence, stream en file" >&2
-      exit 2
-      ;;
-  esac
-fi
-
-"${REPO_DIR}/tools/nicam-run" "${tx_args[@]}" ${NICAM_TX_EXTRA_ARGS} "$@" \
-  | "${REPO_DIR}/tools/nicam-run" module nicam.pluto_tx \
-      --lo "${NICAM_TX_LO_HZ}" \
-      --sample-rate "${NICAM_TX_SAMPLE_RATE}" \
-      --tx-gain "${NICAM_TX_GAIN_DB}" \
-      --rf-bandwidth "${NICAM_TX_RF_BANDWIDTH}" \
-      --amplitude "${NICAM_TX_AMPLITUDE}" \
-      ${NICAM_PLUTO_EXTRA_ARGS}

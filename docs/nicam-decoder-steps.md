@@ -319,7 +319,7 @@ Relevante bestaande onderdelen:
   payload-interleaving.
 - `src/nicam/nicam728.py`: NICAM audio payload encode/decode,
   scale-factor/parity handling en decompanding.
-- `src/nicam_cli.c`: live C-decoder met lock, matched filter,
+- `src/nicam_rx/nicam_cli.c`: live C-decoder met lock, matched filter,
   demodulatiehypotheses, parityscores en audio-uitvoer.
 
 De belangrijkste les uit het artikel is dat een NICAM-decoder pas echt stabiel

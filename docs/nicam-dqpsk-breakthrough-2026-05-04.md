@@ -16,7 +16,7 @@ not the primary problem yet.
 
 ## Breakthrough
 
-The new adaptive DQPSK path in `src/nicam_cli.c` can recover correct raw NICAM
+The new adaptive DQPSK path in `src/nicam_rx/nicam_cli.c` can recover correct raw NICAM
 FAW data from `nicam.iq`.
 
 New options:

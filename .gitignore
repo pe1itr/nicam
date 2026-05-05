@@ -58,3 +58,4 @@ config/environments/*.env
 /nicam
 /nicam-pluto-u8-tx
 /nicam-pluto-tx
+/other_party/

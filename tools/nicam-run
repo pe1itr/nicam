@@ -77,15 +77,98 @@ audio_player() {
 usage() {
   cat >&2 <<'EOF'
 Gebruik:
-  tools/nicam-run nicam-rx [extra nicam.stream_rx opties]
-  tools/nicam-run wbfm-rx [extra wbfm.rtl_rx opties]
-  tools/nicam-run wbfm-tx [extra wbfm.main opties]
+  tools/nicam-run nicam-rx [rtl_sdr opties] [./nicam opties]
+  tools/nicam-run wbfm-rx [extra wbfm_rx.rtl_rx opties]
+  tools/nicam-run wbfm-tx [extra wbfm_tx.main opties]
   tools/nicam-run module <python.module> [args...]
 
 Profielkeuze:
   NICAM_ENV=<naam> gebruikt config/environments/<naam>.env
   NICAM_ENV_FILE=/pad/naar/profiel.env gebruikt expliciet profielbestand
 EOF
+}
+
+run_nicam_rx() {
+  local device_index=0
+  local freq=""
+  local sample_rate="${NICAM_RX_SAMPLE_RATE:-1456000}"
+  local ppm=0
+  local gain=auto
+  local iq_in="-"
+  local iq_format=u8
+  local verbose=0
+  local matched_filter=0
+  local matched_rolloff=0.4
+  local matched_span_symbols=6
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --device-index)
+        device_index="$2"; shift 2 ;;
+      --freq)
+        freq="$2"; shift 2 ;;
+      --sample-rate)
+        sample_rate="$2"; shift 2 ;;
+      --ppm)
+        ppm="$2"; shift 2 ;;
+      --gain)
+        gain="$2"; shift 2 ;;
+      --iq-in)
+        iq_in="$2"; shift 2 ;;
+      --iq-format)
+        iq_format="$2"; shift 2 ;;
+      --matched-filter)
+        matched_filter=1; shift ;;
+      --matched-rolloff)
+        matched_rolloff="$2"; shift 2 ;;
+      --matched-span-symbols)
+        matched_span_symbols="$2"; shift 2 ;;
+      --verbose)
+        verbose=1; shift ;;
+      --help|-h)
+        "${REPO_DIR}/nicam" --help
+        return 0 ;;
+      *)
+        echo "Onbekende nicam-rx optie voor C decoder: $1" >&2
+        return 2 ;;
+    esac
+  done
+
+  local nicam_args=(
+    --sample-rate "${sample_rate}"
+    --iq-format "${iq_format}"
+  )
+  if [[ "${matched_filter}" != "0" ]]; then
+    nicam_args+=(
+      --matched-filter
+      --matched-rolloff "${matched_rolloff}"
+      --matched-span-symbols "${matched_span_symbols}"
+    )
+  fi
+  if [[ "${verbose}" != "0" ]]; then
+    nicam_args+=(--verbose)
+  fi
+
+  if [[ -n "${freq}" ]]; then
+    local rtl_args=(
+      rtl_sdr
+      -d "${device_index}"
+      -f "${freq}"
+      -s "${sample_rate}"
+      -p "${ppm}"
+      -
+    )
+    if [[ "${gain}" != "auto" ]]; then
+      rtl_args=(rtl_sdr -g "${gain}" -d "${device_index}" -f "${freq}" -s "${sample_rate}" -p "${ppm}" -)
+    fi
+    "${rtl_args[@]}" | "${REPO_DIR}/nicam" "${nicam_args[@]}" | audio_player "${NICAM_AUDIO_RATE:-32000}"
+  else
+    if [[ "${iq_in}" == "-" ]]; then
+      "${REPO_DIR}/nicam" "${nicam_args[@]}" | audio_player "${NICAM_AUDIO_RATE:-32000}"
+    else
+      "${REPO_DIR}/nicam" "${nicam_args[@]}" < "${iq_in}" | audio_player "${NICAM_AUDIO_RATE:-32000}"
+    fi
+  fi
 }
 
 if [[ $# -lt 1 ]]; then
@@ -99,13 +182,13 @@ cd "${REPO_DIR}"
 
 case "${cmd}" in
   nicam-rx)
-    run_python -m nicam.stream_rx "$@" --audio-out - | audio_player "${NICAM_AUDIO_RATE:-32000}"
+    run_nicam_rx "$@"
     ;;
   wbfm-rx)
-    run_python -m wbfm.rtl_rx "$@" --audio-out - | audio_player "${WBFM_AUDIO_RATE:-48000}"
+    run_python -m wbfm_rx.rtl_rx "$@" --audio-out - | audio_player "${WBFM_AUDIO_RATE:-48000}"
     ;;
   wbfm-tx)
-    run_python -m wbfm.main "$@"
+    run_python -m wbfm_tx.main "$@"
     ;;
   module)
     if [[ $# -lt 1 ]]; then

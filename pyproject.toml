@@ -21,10 +21,8 @@ audio-device = [
 ]
 
 [project.scripts]
-nicam-stream-rx = "nicam.stream_rx:main"
-nicam-stream-tx = "nicam.stream_tx:main"
-wbfm-rx = "wbfm.rtl_rx:main"
-wbfm-tx = "wbfm.main:main"
+wbfm-rx = "wbfm_rx.rtl_rx:main"
+wbfm-tx = "wbfm_tx.main:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

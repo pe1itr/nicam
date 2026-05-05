@@ -6,7 +6,7 @@ REPO_DIR="$(cd "${SCRIPT_DIR}/.." && pwd)"
 
 cc="${CC:-gcc}"
 "${cc}" -O3 -Wall -Wextra -std=c11 \
-  "${REPO_DIR}/src/nicam_pluto_tx.c" \
+  "${REPO_DIR}/src/nicam_tx/nicam_pluto_tx.c" \
   -liio -lm \
   -o "${REPO_DIR}/nicam-pluto-tx"
 
