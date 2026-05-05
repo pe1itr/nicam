@@ -8,6 +8,6 @@ cc="${CC:-gcc}"
 "${cc}" -O3 -Wall -Wextra -std=c11 \
   "${REPO_DIR}/src/nicam_rx/nicam_cli.c" \
   -lm \
-  -o "${REPO_DIR}/nicam"
+  -o "${REPO_DIR}/nicam-rx"
 
-echo "${REPO_DIR}/nicam"
+echo "${REPO_DIR}/nicam-rx"

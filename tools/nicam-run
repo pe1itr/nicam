@@ -77,7 +77,7 @@ audio_player() {
 usage() {
   cat >&2 <<'EOF'
 Gebruik:
-  tools/nicam-run nicam-rx [rtl_sdr opties] [./nicam opties]
+  tools/nicam-run nicam-rx [rtl_sdr opties] [./nicam-rx opties]
   tools/nicam-run wbfm-rx [extra wbfm_rx.rtl_rx opties]
   tools/nicam-run wbfm-tx [extra wbfm_tx.main opties]
   tools/nicam-run module <python.module> [args...]
@@ -126,7 +126,7 @@ run_nicam_rx() {
       --verbose)
         verbose=1; shift ;;
       --help|-h)
-        "${REPO_DIR}/nicam" --help
+        "${REPO_DIR}/nicam-rx" --help
         return 0 ;;
       *)
         echo "Onbekende nicam-rx optie voor C decoder: $1" >&2
@@ -161,12 +161,12 @@ run_nicam_rx() {
     if [[ "${gain}" != "auto" ]]; then
       rtl_args=(rtl_sdr -g "${gain}" -d "${device_index}" -f "${freq}" -s "${sample_rate}" -p "${ppm}" -)
     fi
-    "${rtl_args[@]}" | "${REPO_DIR}/nicam" "${nicam_args[@]}" | audio_player "${NICAM_AUDIO_RATE:-32000}"
+    "${rtl_args[@]}" | "${REPO_DIR}/nicam-rx" "${nicam_args[@]}" | audio_player "${NICAM_AUDIO_RATE:-32000}"
   else
     if [[ "${iq_in}" == "-" ]]; then
-      "${REPO_DIR}/nicam" "${nicam_args[@]}" | audio_player "${NICAM_AUDIO_RATE:-32000}"
+      "${REPO_DIR}/nicam-rx" "${nicam_args[@]}" | audio_player "${NICAM_AUDIO_RATE:-32000}"
     else
-      "${REPO_DIR}/nicam" "${nicam_args[@]}" < "${iq_in}" | audio_player "${NICAM_AUDIO_RATE:-32000}"
+      "${REPO_DIR}/nicam-rx" "${nicam_args[@]}" < "${iq_in}" | audio_player "${NICAM_AUDIO_RATE:-32000}"
     fi
   fi
 }

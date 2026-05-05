@@ -5,17 +5,23 @@ LDLIBS ?= -lm
 
 PREFIX ?= /usr/local
 BINDIR ?= $(PREFIX)/bin
+NICAM_RX_MODULES := \
+	src/nicam_rx/input.c \
+	src/nicam_rx/dsp.c \
+	src/nicam_rx/demod.c \
+	src/nicam_rx/nicam.c \
+	src/nicam_rx/output.c
 
 .PHONY: all clean install
 
-all: nicam
+all: nicam-rx
 
-nicam: src/nicam_rx/nicam_cli.c
+nicam-rx: src/nicam_rx/nicam_cli.c $(NICAM_RX_MODULES)
 	$(CC) $(CFLAGS) $(LDFLAGS) $< $(LDLIBS) -o $@
 
-install: nicam
+install: nicam-rx
 	install -d "$(DESTDIR)$(BINDIR)"
-	install -m 0755 nicam "$(DESTDIR)$(BINDIR)/nicam"
+	install -m 0755 nicam-rx "$(DESTDIR)$(BINDIR)/nicam-rx"
 
 clean:
-	rm -f nicam
+	rm -f nicam-rx nicam
