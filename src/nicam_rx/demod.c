@@ -498,6 +498,109 @@ static int adaptive_setup_hypotheses(const Config *cfg, AdaptiveHypothesisState 
     *out_count = idx;
     return 0;
 }
+
+static long long wall_time_ms(void) {
+    struct timeval tv;
+    if (gettimeofday(&tv, NULL) != 0) {
+        return 0;
+    }
+    return (long long)tv.tv_sec * 1000LL + (long long)tv.tv_usec / 1000LL;
+}
+
+static void json_write_string(FILE *fp, const char *value) {
+    fputc('"', fp);
+    for (const unsigned char *p = (const unsigned char *)value; *p != '\0'; p++) {
+        if (*p == '"' || *p == '\\') {
+            fputc('\\', fp);
+            fputc((int)*p, fp);
+        } else if (*p >= 32 && *p <= 126) {
+            fputc((int)*p, fp);
+        } else {
+            fprintf(fp, "\\u%04x", (unsigned int)*p);
+        }
+    }
+    fputc('"', fp);
+}
+
+static void write_status_json(
+    const Config *cfg,
+    const AdaptiveHypothesisState *st,
+    int locked,
+    int frames,
+    int bad_frames,
+    int pending_frames,
+    int align_drop_bits,
+    int sync_drop_bits,
+    size_t bitbuffer_bits,
+    size_t hyp,
+    size_t faw_hits,
+    int faw_error_sum,
+    int resets,
+    const StationIdState *station_id
+) {
+    if (cfg->stats_json_path == NULL || cfg->stats_json_path[0] == '\0') {
+        return;
+    }
+
+    size_t tmp_path_len = strlen(cfg->stats_json_path) + 32;
+    char *tmp_path = (char *)malloc(tmp_path_len);
+    if (tmp_path == NULL) {
+        return;
+    }
+    int n = snprintf(tmp_path, tmp_path_len, "%s.tmp.%ld", cfg->stats_json_path, (long)getpid());
+    if (n < 0 || (size_t)n >= tmp_path_len) {
+        free(tmp_path);
+        return;
+    }
+
+    FILE *fp = fopen(tmp_path, "w");
+    if (fp == NULL) {
+        free(tmp_path);
+        return;
+    }
+
+    double slicer_confidence =
+        st->slicer_confidence_count > 0
+            ? st->slicer_confidence_sum / (double)st->slicer_confidence_count
+            : 0.0;
+    double bad_frame_rate = frames > 0 ? (double)bad_frames / (double)frames : 0.0;
+    double carrier_hz = -st->carrier_freq * (double)cfg->sample_rate / (2.0 * M_PI);
+
+    fprintf(fp, "{\n");
+    fprintf(fp, "  \"timestamp_ms\": %lld,\n", wall_time_ms());
+    fprintf(fp, "  \"locked\": %s,\n", locked ? "true" : "false");
+    fprintf(fp, "  \"frames\": %d,\n", frames);
+    fprintf(fp, "  \"bad_frames\": %d,\n", bad_frames);
+    fprintf(fp, "  \"bad_frame_rate\": %.9f,\n", bad_frame_rate);
+    fprintf(fp, "  \"pending_frames\": %d,\n", pending_frames);
+    fprintf(fp, "  \"align_drop_bits\": %d,\n", align_drop_bits);
+    fprintf(fp, "  \"sync_drop_bits\": %d,\n", sync_drop_bits);
+    fprintf(fp, "  \"bitbuffer_bits\": %zu,\n", bitbuffer_bits);
+    fprintf(fp, "  \"hypothesis\": %zu,\n", hyp);
+    fprintf(fp, "  \"faw_hits\": %zu,\n", faw_hits);
+    fprintf(fp, "  \"faw_error_sum\": %d,\n", faw_error_sum);
+    fprintf(fp, "  \"resets\": %d,\n", resets);
+    fprintf(fp, "  \"slicer_conf\": %.6f,\n", slicer_confidence);
+    fprintf(fp, "  \"slicer_symbols\": %zu,\n", st->slicer_confidence_count);
+    fprintf(fp, "  \"carrier_hz\": %.3f,\n", carrier_hz);
+    fprintf(fp, "  \"omega\": %.9f,\n", st->omega);
+    fprintf(fp, "  \"station_id\": ");
+    json_write_string(fp, station_id->displayed);
+    fprintf(fp, ",\n");
+    fprintf(fp, "  \"station_cycles\": %u\n", station_id->cycles);
+    fprintf(fp, "}\n");
+
+    if (fclose(fp) != 0) {
+        unlink(tmp_path);
+        free(tmp_path);
+        return;
+    }
+    if (rename(tmp_path, cfg->stats_json_path) != 0) {
+        unlink(tmp_path);
+    }
+    free(tmp_path);
+}
+
 static int run_adaptive_quality(const Config *cfg, FrontendFilter *frontend, MatchedFilter *matched) {
     AdaptiveHypothesisState *hps = NULL;
     size_t hyp_count = 0;
@@ -744,6 +847,23 @@ static int run_adaptive_quality(const Config *cfg, FrontendFilter *frontend, Mat
                         best_stats->slicer_confidence_count > 0
                             ? best_stats->slicer_confidence_sum / (double)best_stats->slicer_confidence_count
                             : 0.0;
+                    int locked = best_stream_hits > 0 && best_stream_errors == 0;
+                    write_status_json(
+                        cfg,
+                        best_stats,
+                        locked,
+                        adaptive_frames,
+                        adaptive_bad_frames,
+                        pending_conceal_frames,
+                        adaptive_align_drops,
+                        adaptive_sync_bit_drops,
+                        bb->len,
+                        best_stream_hyp,
+                        best_stream_hits,
+                        best_stream_errors,
+                        adaptive_resets,
+                        &station_id
+                    );
                     fprintf(stderr,
                             "nicam_stats frames=%d bad=%d pending=%d align_drop_bits=%d sync_drop_bits=%d bb_bits=%zu hyp=%zu faw_hits=%zu faw_errsum=%d resets=%d slicer_conf=%.3f slicer_symbols=%zu station_id=%s station_cycles=%u\n",
                             adaptive_frames,

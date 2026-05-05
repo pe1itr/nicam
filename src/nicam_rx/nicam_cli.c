@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 #include <unistd.h>
 
 #ifndef M_PI
@@ -64,6 +65,7 @@ typedef struct {
     int conceal_bad_frames;
     int scramble_phase;
     int allow_unsupported_modes;
+    const char *stats_json_path;
 } Config;
 
 enum {
@@ -188,7 +190,7 @@ static uint8_t scramble[BODY_BITS];
 
 static void usage(const char *argv0) {
     fprintf(stderr,
-            "Gebruik: %s [--sample-rate 1456000] [--input-sample-rate HZ] [--iq-format u8|s16] [--frontend-lowpass-hz HZ] [--carrier-search-hz HZ] [--carrier-search-step-hz HZ] [--timing-search-steps N] [--matched-filter] [--adaptive-demod|--adaptive-fixed] [--descramble-phase N|--legacy-descramble] [--ram-read-start N] [--ram-read-stride N] [--lock-confirm-frames N] [--lock-drop-frames N] [--bitstream-quality] [--verbose]\n"
+            "Gebruik: %s [--sample-rate 1456000] [--input-sample-rate HZ] [--iq-format u8|s16] [--frontend-lowpass-hz HZ] [--carrier-search-hz HZ] [--carrier-search-step-hz HZ] [--timing-search-steps N] [--matched-filter] [--adaptive-demod|--adaptive-fixed] [--descramble-phase N|--legacy-descramble] [--ram-read-start N] [--ram-read-stride N] [--lock-confirm-frames N] [--lock-drop-frames N] [--stats-json FILE] [--bitstream-quality] [--verbose]\n"
             "stdin: interleaved IQ, default rtl_sdr uint8; stdout: stereo s16le 32 kHz\n"
             "default: adaptive-fixed decoder; legacy non-adaptive demod requires -DNICAM_ENABLE_LEGACY_DEMOD=1\n",
             argv0);
@@ -227,6 +229,7 @@ static int parse_args(int argc, char **argv, Config *cfg) {
     cfg->conceal_bad_frames = 1;
     cfg->scramble_phase = 0;
     cfg->allow_unsupported_modes = 0;
+    cfg->stats_json_path = NULL;
 
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--sample-rate") == 0 && i + 1 < argc) {
@@ -317,6 +320,8 @@ static int parse_args(int argc, char **argv, Config *cfg) {
             cfg->scramble_phase = -LEGACY_SCRAMBLE_PHASE;
         } else if (strcmp(argv[i], "--allow-unsupported-modes") == 0) {
             cfg->allow_unsupported_modes = 1;
+        } else if (strcmp(argv[i], "--stats-json") == 0 && i + 1 < argc) {
+            cfg->stats_json_path = argv[++i];
         } else if (strcmp(argv[i], "--help") == 0 || strcmp(argv[i], "-h") == 0) {
             usage(argv[0]);
             return 1;

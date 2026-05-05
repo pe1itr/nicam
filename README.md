@@ -646,6 +646,44 @@ Voorbeeldregel:
 decoded_frames=29998
 ```
 
+## NICAM RX statuspagina
+
+De C-ontvanger kan periodiek een machineleesbare status naar JSON schrijven:
+
+```sh
+NICAM_RX_STATUS_JSON="${XDG_RUNTIME_DIR:-/tmp}/nicam/nicam-rx-status.json" \
+NICAM_RX_STATUS_EVERY=1000 \
+tools/websdr-nicam-rx
+```
+
+`tools/nicam-run` maakt de directory aan en geeft dit door als
+`--stats-json ... --stats-every ...` aan `./nicam-rx`. De standaard in
+`config/environments/websdr.env.example` schrijft naar:
+
+```text
+${XDG_RUNTIME_DIR:-/tmp}/nicam/nicam-rx-status.json
+```
+
+De JSON bevat onder andere `locked`, `station_id`, `bad_frame_rate`,
+`slicer_conf`, `carrier_hz`, `omega`, frame counters en sync/drop counters.
+
+Voor een eenvoudig dashboard staat er een statische pagina in:
+
+```text
+web/nicam-rx-status.html
+```
+
+Plaats deze pagina op de webserver van `websdr` en serveer het JSON-bestand als
+`nicam-rx-status.json` naast de pagina, of geef een andere URL mee:
+
+```text
+nicam-rx-status.html?status=/path/to/nicam-rx-status.json
+```
+
+Een praktische systemd/webserver-opzet is om de ontvanger naar
+`/run/user/$UID/nicam/nicam-rx-status.json` te laten schrijven en die file via
+een webserver-alias of periodieke kopie onder de webroot zichtbaar te maken.
+
 ## Referenties
 
 - ETSI ETS 300 163 (NICAM 728, Nov 1994): https://www.etsi.org/deliver/etsi_i_ets/300100_300199/300163/01_60/ets_300163e01p.pdf
