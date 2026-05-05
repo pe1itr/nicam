@@ -654,3 +654,23 @@ decoded_frames=29998
 De huidige defaults gebruiken `1.456 MS/s` en `364 ksym/s`, dus 4 samples per
 symbool. Dat is breder dan strikt nodig voor 128 kbit/s Opus, maar sluit aan op
 de bestaande SDR-pijplijn en houdt de eerste timing eenvoudig.
+
+## Licentie
+
+Dit project is gelicentieerd onder de Apache License, Version 2.0. Zie
+[LICENSE](LICENSE).
+
+Attributie is niet verplicht, maar bronvermelding naar Rob Hardenberg (PE1ITR)
+wordt gewaardeerd bij gebruik van deze software, metingen, plots of afgeleide
+resultaten in publicaties, presentaties, artikelen, video's of publieke
+projecten. Zie [NOTICE](NOTICE).
+
+De softwarelicentie geeft geen toestemming om buiten de geldende radio-,
+omroep-, spectrum- of typegoedkeuringsregels uit te zenden. Controleer voor
+praktisch RF-gebruik zelf de lokale regelgeving, vergunningen en bandplannen.
+
+NICAM 728 is beschreven in ETSI EN 300 163. ETSI-documenten kunnen verwijzen
+naar verklaarde of mogelijk essentiele IPR's; ETSI voert daarbij zelf geen
+volledige patent-clearance uit. Deze repository bevat een experimentele
+implementatie en geeft geen garantie dat gebruik in een product, dienst of
+uitzending vrij is van rechten van derden.
