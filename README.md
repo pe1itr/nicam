@@ -244,6 +244,15 @@ NICAM_TX_PULSE_SPAN_SYMBOLS=6
 
 Referentiemetingen:
 
+- C TX/RX bit-error sweep, SNR `0..14 dB` in stappen van `0.5 dB`
+  (`7,280,000` uitgezonden bits; bad frames en gemiste frames tellen als
+  bitfouten):
+
+  ![NICAM C TX/RX bit error vs SNR](artifacts/nicam-snr-loop-2026-05-05/nicam-c-rx-bit-error-snr-0-14-step-0.5-2026-05-05.png)
+- C TX-spectrum van dezelfde PRBS-bron, 1.5 MHz span, relatieve schaal
+  `0..-45 dB`:
+
+  ![NICAM C TX spectrum, 1.5 MHz span](artifacts/nicam-snr-loop-2026-05-05/nicam-tx-spectrum-1p5mhz-relative-2026-05-06.png)
 - Decoder threshold, final filter vs baseline:
   `artifacts/nicam-final/nicam-final-lpf49-425k-error-percent-vs-baseline-latest.png`
 - Final spectrum, 2 MHz span tot `-40 dB`:
@@ -531,7 +540,7 @@ AUDIO_BACKEND=ffplay tools/nicam-run nicam-rx \
 ```
 
 Als de zender een Digital Baseband V1.4-compatible station-ID meestuurt, print
-`./nicam` de gestabiliseerde waarde op stderr als `station_id=...`.
+`./nicam-rx` de gestabiliseerde waarde op stderr als `station_id=...`.
 
 ## Testen zonder SDR's
 
@@ -539,14 +548,14 @@ Directe offline test van C-zender naar C-ontvanger:
 
 ```sh
 ./nicam-pluto-tx --source tone --seconds 5 --iq-out /tmp/nicam-loop.iq
-./nicam --sample-rate 1456000 --matched-filter --verbose < /tmp/nicam-loop.iq > /tmp/nicam-loop.pcm
+./nicam-rx --sample-rate 1456000 --matched-filter --verbose < /tmp/nicam-loop.iq > /tmp/nicam-loop.pcm
 ```
 
 Live luisteren met `ffplay`:
 
 ```sh
 ./nicam-pluto-tx --source tone --seconds 5 --iq-out /tmp/nicam-tone.iq
-./nicam --sample-rate 1456000 --matched-filter < /tmp/nicam-tone.iq \
+./nicam-rx --sample-rate 1456000 --matched-filter < /tmp/nicam-tone.iq \
   | ffplay -hide_banner -loglevel error -nodisp -f s16le -sample_rate 32000 -ch_layout stereo -i -
 ```
 
@@ -555,7 +564,7 @@ controleren of de modulator-demodulator-keten audio produceert:
 
 ```sh
 ./nicam-pluto-tx --source tone --seconds 3 --iq-out /tmp/nicam-tone.iq
-./nicam --sample-rate 1456000 --matched-filter --verbose < /tmp/nicam-tone.iq > /tmp/nicam-tone.pcm
+./nicam-rx --sample-rate 1456000 --matched-filter --verbose < /tmp/nicam-tone.iq > /tmp/nicam-tone.pcm
 ffplay -hide_banner -loglevel error -autoexit -f s16le -sample_rate 32000 -ch_layout stereo -i /tmp/nicam-tone.pcm
 ```
 
