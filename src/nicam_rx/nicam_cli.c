@@ -40,6 +40,7 @@ typedef struct {
     int verbose;
     int bitstream_quality;
     int stats_every;
+    int stats_json_every;
     int frontend_lowpass_hz;
     int carrier_search_hz;
     int carrier_search_step_hz;
@@ -190,7 +191,7 @@ static uint8_t scramble[BODY_BITS];
 
 static void usage(const char *argv0) {
     fprintf(stderr,
-            "Gebruik: %s [--sample-rate 1456000] [--input-sample-rate HZ] [--iq-format u8|s16] [--frontend-lowpass-hz HZ] [--carrier-search-hz HZ] [--carrier-search-step-hz HZ] [--timing-search-steps N] [--matched-filter] [--adaptive-demod|--adaptive-fixed] [--descramble-phase N|--legacy-descramble] [--ram-read-start N] [--ram-read-stride N] [--lock-confirm-frames N] [--lock-drop-frames N] [--stats-json FILE] [--bitstream-quality] [--verbose]\n"
+            "Gebruik: %s [--sample-rate 1456000] [--input-sample-rate HZ] [--iq-format u8|s16] [--frontend-lowpass-hz HZ] [--carrier-search-hz HZ] [--carrier-search-step-hz HZ] [--timing-search-steps N] [--matched-filter] [--adaptive-demod|--adaptive-fixed] [--descramble-phase N|--legacy-descramble] [--ram-read-start N] [--ram-read-stride N] [--lock-confirm-frames N] [--lock-drop-frames N] [--stats-every N] [--stats-json FILE] [--stats-json-every N] [--bitstream-quality] [--verbose]\n"
             "stdin: interleaved IQ, default rtl_sdr uint8; stdout: stereo s16le 32 kHz\n"
             "default: adaptive-fixed decoder; legacy non-adaptive demod requires -DNICAM_ENABLE_LEGACY_DEMOD=1\n",
             argv0);
@@ -204,6 +205,7 @@ static int parse_args(int argc, char **argv, Config *cfg) {
     cfg->verbose = 0;
     cfg->bitstream_quality = 0;
     cfg->stats_every = 0;
+    cfg->stats_json_every = 0;
     cfg->frontend_lowpass_hz = 0;
     cfg->carrier_search_hz = 0;
     cfg->carrier_search_step_hz = 0;
@@ -253,6 +255,8 @@ static int parse_args(int argc, char **argv, Config *cfg) {
             cfg->bitstream_quality = 1;
         } else if (strcmp(argv[i], "--stats-every") == 0 && i + 1 < argc) {
             cfg->stats_every = atoi(argv[++i]);
+        } else if (strcmp(argv[i], "--stats-json-every") == 0 && i + 1 < argc) {
+            cfg->stats_json_every = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--frontend-lowpass-hz") == 0 && i + 1 < argc) {
             cfg->frontend_lowpass_hz = atoi(argv[++i]);
         } else if (strcmp(argv[i], "--carrier-search-hz") == 0 && i + 1 < argc) {
@@ -361,6 +365,9 @@ static int parse_args(int argc, char **argv, Config *cfg) {
     }
     if (cfg->stats_every < 0) {
         cfg->stats_every = 0;
+    }
+    if (cfg->stats_json_every < 0) {
+        cfg->stats_json_every = 0;
     }
     if (cfg->chunk_bytes < 4096) {
         cfg->chunk_bytes = 4096;

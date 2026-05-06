@@ -1,5 +1,5 @@
 [Unit]
-Description=NICAM receiver via rtl_sdr (device 2, 436 MHz IF)
+Description=NICAM receiver via rtl_sdr (websdr, 436 MHz IF)
 After=default.target
 
 [Service]
@@ -9,9 +9,9 @@ ExecStart=%h/nicam-transmitter/systemd/user/nicam-rx.sh
 Restart=always
 RestartSec=2
 Environment=PYTHONUNBUFFERED=1
+Environment=NICAM_ENV=websdr
 # Optional:
-# Environment=NICAM_ENV=odroid
-# Environment=NICAM_ENV_FILE=%h/nicam-transmitter/config/environments/odroid.env
+# Environment=NICAM_ENV_FILE=%h/nicam-transmitter/config/environments/websdr.env
 
 [Install]
 WantedBy=default.target

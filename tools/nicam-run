@@ -137,7 +137,7 @@ run_nicam_rx() {
         matched_span_symbols="$2"; shift 2 ;;
       --adaptive-fixed|--bitstream-quality|--matched-filter|--allow-unsupported-modes)
         nicam_extra+=("$1"); shift ;;
-      --timing-search-steps|--chunk-bytes|--carrier-search-hz|--carrier-search-step-hz|--conceal-mode|--stats-every|--stats-json|--frontend-lowpass-hz|--adaptive-costas-alpha|--adaptive-gain-mu|--adaptive-omega-relative-limit|--ram-read-start|--ram-read-stride|--max-parity-errors|--max-pcm-step|--lock-max-parity-errors|--lock-confirm-frames|--lock-drop-frames|--max-bad-frames|--conceal-bad-frames|--scramble-phase)
+      --timing-search-steps|--chunk-bytes|--carrier-search-hz|--carrier-search-step-hz|--conceal-mode|--stats-every|--stats-json|--stats-json-every|--frontend-lowpass-hz|--adaptive-costas-alpha|--adaptive-gain-mu|--adaptive-omega-relative-limit|--ram-read-start|--ram-read-stride|--max-parity-errors|--max-pcm-step|--lock-max-parity-errors|--lock-confirm-frames|--lock-drop-frames|--max-bad-frames|--conceal-bad-frames|--scramble-phase)
         nicam_extra+=("$1" "$2"); shift 2 ;;
       --verbose)
         verbose=1; shift ;;
@@ -168,7 +168,7 @@ run_nicam_rx() {
     mkdir -p "$(dirname -- "${NICAM_RX_STATUS_JSON}")"
     nicam_args+=(--stats-json "${NICAM_RX_STATUS_JSON}")
     if [[ "${NICAM_RX_STATUS_EVERY}" != "0" ]]; then
-      nicam_args+=(--stats-every "${NICAM_RX_STATUS_EVERY}")
+      nicam_args+=(--stats-json-every "${NICAM_RX_STATUS_EVERY}")
     fi
   fi
   nicam_args+=("${nicam_extra[@]}")

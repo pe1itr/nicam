@@ -525,6 +525,8 @@ static void json_write_string(FILE *fp, const char *value) {
 static void write_status_json(
     const Config *cfg,
     const AdaptiveHypothesisState *st,
+    const char *rx_status,
+    int signal_present,
     int locked,
     int frames,
     int bad_frames,
@@ -568,10 +570,18 @@ static void write_status_json(
 
     fprintf(fp, "{\n");
     fprintf(fp, "  \"timestamp_ms\": %lld,\n", wall_time_ms());
+    fprintf(fp, "  \"rx_status\": ");
+    json_write_string(fp, rx_status);
+    fprintf(fp, ",\n");
+    fprintf(fp, "  \"signal_present\": %s,\n", signal_present ? "true" : "false");
     fprintf(fp, "  \"locked\": %s,\n", locked ? "true" : "false");
     fprintf(fp, "  \"frames\": %d,\n", frames);
     fprintf(fp, "  \"bad_frames\": %d,\n", bad_frames);
-    fprintf(fp, "  \"bad_frame_rate\": %.9f,\n", bad_frame_rate);
+    if (signal_present) {
+        fprintf(fp, "  \"bad_frame_rate\": %.9f,\n", bad_frame_rate);
+    } else {
+        fprintf(fp, "  \"bad_frame_rate\": null,\n");
+    }
     fprintf(fp, "  \"pending_frames\": %d,\n", pending_frames);
     fprintf(fp, "  \"align_drop_bits\": %d,\n", align_drop_bits);
     fprintf(fp, "  \"sync_drop_bits\": %d,\n", sync_drop_bits);
@@ -638,6 +648,7 @@ static int run_adaptive_quality(const Config *cfg, FrontendFilter *frontend, Mat
     int adaptive_align_drops = 0;
     int adaptive_sync_bit_drops = 0;
     int adaptive_last_stat_frame = 0;
+    int adaptive_last_json_frame = 0;
     int adaptive_no_faw_chunks = 0;
     int adaptive_resets = 0;
     StationIdState station_id;
@@ -840,32 +851,28 @@ static int run_adaptive_quality(const Config *cfg, FrontendFilter *frontend, Mat
                 (void)left;
                 (void)right;
                 adaptive_frames++;
-                if (cfg->stats_every > 0 &&
-                    adaptive_frames - adaptive_last_stat_frame >= cfg->stats_every) {
+                int stats_due = cfg->stats_every > 0 &&
+                    adaptive_frames - adaptive_last_stat_frame >= cfg->stats_every;
+                int json_due = cfg->stats_json_every > 0 &&
+                    adaptive_frames - adaptive_last_json_frame >= cfg->stats_json_every;
+                if (stats_due || json_due) {
                     AdaptiveHypothesisState *best_stats = &hps[best_stream_hyp];
                     double slicer_confidence =
                         best_stats->slicer_confidence_count > 0
                             ? best_stats->slicer_confidence_sum / (double)best_stats->slicer_confidence_count
                             : 0.0;
                     int locked = best_stream_hits > 0 && best_stream_errors == 0;
-                    write_status_json(
-                        cfg,
-                        best_stats,
-                        locked,
-                        adaptive_frames,
-                        adaptive_bad_frames,
-                        pending_conceal_frames,
-                        adaptive_align_drops,
-                        adaptive_sync_bit_drops,
-                        bb->len,
-                        best_stream_hyp,
-                        best_stream_hits,
-                        best_stream_errors,
-                        adaptive_resets,
-                        &station_id
-                    );
-                    fprintf(stderr,
-                            "nicam_stats frames=%d bad=%d pending=%d align_drop_bits=%d sync_drop_bits=%d bb_bits=%zu hyp=%zu faw_hits=%zu faw_errsum=%d resets=%d slicer_conf=%.3f slicer_symbols=%zu station_id=%s station_cycles=%u\n",
+                    int signal_present =
+                        best_stream_hits > 0 &&
+                        best_stream_errors <= (int)(best_stream_hits * 2);
+                    const char *rx_status = locked ? "locked" : (signal_present ? "unlocked" : "idle");
+                    if (json_due) {
+                        write_status_json(
+                            cfg,
+                            best_stats,
+                            rx_status,
+                            signal_present,
+                            locked,
                             adaptive_frames,
                             adaptive_bad_frames,
                             pending_conceal_frames,
@@ -876,11 +883,29 @@ static int run_adaptive_quality(const Config *cfg, FrontendFilter *frontend, Mat
                             best_stream_hits,
                             best_stream_errors,
                             adaptive_resets,
-                            slicer_confidence,
-                            best_stats->slicer_confidence_count,
-                            station_id.displayed,
-                            station_id.cycles);
-                    adaptive_last_stat_frame = adaptive_frames;
+                            &station_id
+                        );
+                        adaptive_last_json_frame = adaptive_frames;
+                    }
+                    if (stats_due) {
+                        fprintf(stderr,
+                                "nicam_stats frames=%d bad=%d pending=%d align_drop_bits=%d sync_drop_bits=%d bb_bits=%zu hyp=%zu faw_hits=%zu faw_errsum=%d resets=%d slicer_conf=%.3f slicer_symbols=%zu station_id=%s station_cycles=%u\n",
+                                adaptive_frames,
+                                adaptive_bad_frames,
+                                pending_conceal_frames,
+                                adaptive_align_drops,
+                                adaptive_sync_bit_drops,
+                                bb->len,
+                                best_stream_hyp,
+                                best_stream_hits,
+                                best_stream_errors,
+                                adaptive_resets,
+                                slicer_confidence,
+                                best_stats->slicer_confidence_count,
+                                station_id.displayed,
+                                station_id.cycles);
+                        adaptive_last_stat_frame = adaptive_frames;
+                    }
                 }
                 bitbuf_drop(bb, FRAME_BITS);
             }

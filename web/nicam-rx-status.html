@@ -50,6 +50,9 @@
     .ok {
       color: #63d471;
     }
+    .idle {
+      color: #e0b84f;
+    }
     .bad {
       color: #ff6961;
     }
@@ -108,7 +111,10 @@
   </main>
   <script>
     const statusUrl = new URLSearchParams(location.search).get("status") || "nicam-rx-status.json";
+    const stoppedAfterMs = 7000;
     const detailKeys = [
+      "rx_status",
+      "signal_present",
       "frames",
       "bad_frames",
       "pending_frames",
@@ -136,6 +142,20 @@
       return String(value);
     }
 
+    function deriveStatus(data) {
+      const timestamp = Number(data.timestamp_ms);
+      if (!Number.isFinite(timestamp) || Date.now() - timestamp > stoppedAfterMs) {
+        return { label: "STOPPED", className: "bad" };
+      }
+      if (data.rx_status === "idle" || data.signal_present === false) {
+        return { label: "IDLE", className: "idle" };
+      }
+      if (data.locked) {
+        return { label: "LOCKED", className: "ok" };
+      }
+      return { label: "UNLOCKED", className: "bad" };
+    }
+
     function setText(id, value) {
       document.getElementById(id).textContent = value;
     }
@@ -147,8 +167,9 @@
         const data = await response.json();
 
         const locked = document.getElementById("locked");
-        locked.textContent = data.locked ? "LOCKED" : "NO LOCK";
-        locked.className = `value ${data.locked ? "ok" : "bad"}`;
+        const status = deriveStatus(data);
+        locked.textContent = status.label;
+        locked.className = `value ${status.className}`;
         setText("station_id", (data.station_id || "").trim() || "-");
         setText("slicer_conf", formatValue("slicer_conf", data.slicer_conf));
         setText("bad_frame_rate", formatValue("bad_frame_rate", data.bad_frame_rate));
@@ -158,7 +179,7 @@
         )).join("");
         setText("footer", `Updated from ${statusUrl}`);
       } catch (error) {
-        document.getElementById("locked").textContent = "OFFLINE";
+        document.getElementById("locked").textContent = "STOPPED";
         document.getElementById("locked").className = "value bad";
         setText("footer", `Cannot read ${statusUrl}: ${error.message}`);
       }

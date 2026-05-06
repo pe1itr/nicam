@@ -14,15 +14,18 @@ else
   echo "websdr-nicam-rx: env-bestand niet gevonden: ${ENV_FILE}" >&2
 fi
 
-DEVICE_INDEX="${NICAM_RX_DEVICE_INDEX:-${DEVICE_INDEX:-1}}"
+DEVICE_INDEX="${NICAM_RX_DEVICE_INDEX:-${DEVICE_INDEX:-00000001}}"
 FREQ_HZ="${NICAM_RX_FREQ_HZ:-436000000}"
 SAMPLE_RATE="${NICAM_RX_SAMPLE_RATE:-1456000}"
 PPM="${NICAM_RX_PPM:-0}"
-GAIN="${NICAM_RX_GAIN:-auto}"
+GAIN="${NICAM_RX_GAIN:-33}"
 MATCHED_FILTER="${NICAM_RX_MATCHED_FILTER:-0}"
 MATCHED_ROLLOFF="${NICAM_RX_MATCHED_ROLLOFF:-0.4}"
 MATCHED_SPAN_SYMBOLS="${NICAM_RX_MATCHED_SPAN_SYMBOLS:-6}"
-NICAM_RX_EXTRA_ARGS="${NICAM_RX_EXTRA_ARGS:-}"
+: "${NICAM_RX_STATUS_JSON:=/var/www/html/nicam/nicam-rx-status.json}"
+: "${NICAM_RX_STATUS_EVERY:=2000}"
+: "${NICAM_RX_EXTRA_ARGS:=--adaptive-fixed --timing-search-steps 16 --chunk-bytes 32768 --carrier-search-hz 34000 --carrier-search-step-hz 1000 --conceal-mode bridge}"
+export NICAM_RX_STATUS_JSON NICAM_RX_STATUS_EVERY
 
 rx_args=()
 if [[ "${MATCHED_FILTER}" != "0" ]]; then
@@ -34,6 +37,9 @@ if [[ "${MATCHED_FILTER}" != "0" ]]; then
 fi
 
 echo "websdr-nicam-rx: freq=${FREQ_HZ} Hz sample_rate=${SAMPLE_RATE} gain=${GAIN}" >&2
+if [[ -n "${NICAM_RX_STATUS_JSON}" ]]; then
+  echo "websdr-nicam-rx: status_json=${NICAM_RX_STATUS_JSON} status_every=${NICAM_RX_STATUS_EVERY}" >&2
+fi
 
 exec "${REPO_DIR}/tools/nicam-run" nicam-rx \
   --device-index "${DEVICE_INDEX}" \

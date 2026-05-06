@@ -543,6 +543,8 @@ AUDIO_BACKEND=ffplay tools/nicam-run nicam-rx \
 Als de zender een Digital Baseband V1.4-compatible station-ID meestuurt, print
 `./nicam-rx` de gestabiliseerde waarde op stderr als `station_id=...`. Met
 `--stats-every N` staat dezelfde waarde ook in de periodieke `nicam_stats` regel.
+JSON-statusupdates zijn apart instelbaar met `--stats-json FILE` en
+`--stats-json-every N`.
 
 ## Testen zonder SDR's
 
@@ -608,11 +610,12 @@ systemctl --user status nicam-rx.service
 journalctl --user -u nicam-rx.service -f
 ```
 
-Standaard draait deze service met `rtl_sdr -d 2` op `436000000` Hz.
+Standaard draait deze service via `tools/websdr-nicam-rx`, met
+`rtl_sdr -d 00000001` op `436000000` Hz.
 Dit is bedoeld voor een externe converter met LO `1888 MHz` voor een doelfrequentie
 van `2324 MHz` (`2324 - 1888 = 436 MHz` IF).
 
-Extra C-decoderopties kun je via `EXTRA_RX_ARGS` meegeven, bijvoorbeeld het
+Extra C-decoderopties kun je via `NICAM_RX_EXTRA_ARGS` meegeven, bijvoorbeeld het
 matched filter:
 
 ```sh
@@ -623,7 +626,7 @@ Voeg toe:
 
 ```ini
 [Service]
-Environment=EXTRA_RX_ARGS=--matched-filter --verbose
+Environment=NICAM_RX_EXTRA_ARGS=--matched-filter --verbose
 ```
 
 Daarna:
@@ -633,7 +636,7 @@ systemctl --user daemon-reload
 systemctl --user restart nicam-rx.service
 ```
 
-Uitzetten: verwijder deze `Environment=EXTRA_RX_ARGS=...` regel weer (of maak hem leeg) en herstart de service.
+Uitzetten: verwijder deze `Environment=NICAM_RX_EXTRA_ARGS=...` regel weer (of maak hem leeg) en herstart de service.
 
 Waar zie je het:
 
@@ -651,21 +654,25 @@ decoded_frames=29998
 De C-ontvanger kan periodiek een machineleesbare status naar JSON schrijven:
 
 ```sh
-NICAM_RX_STATUS_JSON="${XDG_RUNTIME_DIR:-/tmp}/nicam/nicam-rx-status.json" \
-NICAM_RX_STATUS_EVERY=1000 \
+NICAM_RX_STATUS_JSON=/var/www/html/nicam/nicam-rx-status.json \
+NICAM_RX_STATUS_EVERY=2000 \
 tools/websdr-nicam-rx
 ```
 
 `tools/nicam-run` maakt de directory aan en geeft dit door als
-`--stats-json ... --stats-every ...` aan `./nicam-rx`. De standaard in
+`--stats-json ... --stats-json-every ...` aan `./nicam-rx`. De standaard in
 `config/environments/websdr.env.example` schrijft naar:
 
 ```text
-${XDG_RUNTIME_DIR:-/tmp}/nicam/nicam-rx-status.json
+/var/www/html/nicam/nicam-rx-status.json
 ```
 
-De JSON bevat onder andere `locked`, `station_id`, `bad_frame_rate`,
-`slicer_conf`, `carrier_hz`, `omega`, frame counters en sync/drop counters.
+De JSON bevat onder andere `rx_status`, `signal_present`, `locked`,
+`station_id`, `bad_frame_rate`, `slicer_conf`, `carrier_hz`, `omega`, frame
+counters en sync/drop counters. `bad_frame_rate` is `null` zolang er geen
+signaalstructuur aanwezig is. De statuspagina toont `STOPPED` wanneer de JSON
+ontbreekt of te oud is, `IDLE` wanneer de ontvanger draait maar geen bruikbaar
+signaal ziet, en `LOCKED`/`UNLOCKED` wanneer er wel signaalstructuur aanwezig is.
 
 Voor een eenvoudig dashboard staat er een statische pagina in:
 
@@ -680,9 +687,9 @@ Plaats deze pagina op de webserver van `websdr` en serveer het JSON-bestand als
 nicam-rx-status.html?status=/path/to/nicam-rx-status.json
 ```
 
-Een praktische systemd/webserver-opzet is om de ontvanger naar
-`/run/user/$UID/nicam/nicam-rx-status.json` te laten schrijven en die file via
-een webserver-alias of periodieke kopie onder de webroot zichtbaar te maken.
+De huidige `websdr`-default schrijft direct naar
+`/var/www/html/nicam/nicam-rx-status.json`. Zorg dat deze directory bestaat en
+schrijfbaar is voor de user waaronder de systemd user-service draait.
 
 ## Referenties
 
