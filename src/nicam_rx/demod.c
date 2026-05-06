@@ -528,6 +528,8 @@ static void write_status_json(
     const char *rx_status,
     int signal_present,
     int locked,
+    int bad_frame_rate_valid,
+    double bad_frame_rate,
     int frames,
     int bad_frames,
     int pending_frames,
@@ -565,7 +567,6 @@ static void write_status_json(
         st->slicer_confidence_count > 0
             ? st->slicer_confidence_sum / (double)st->slicer_confidence_count
             : 0.0;
-    double bad_frame_rate = frames > 0 ? (double)bad_frames / (double)frames : 0.0;
     double carrier_hz = -st->carrier_freq * (double)cfg->sample_rate / (2.0 * M_PI);
 
     fprintf(fp, "{\n");
@@ -577,7 +578,7 @@ static void write_status_json(
     fprintf(fp, "  \"locked\": %s,\n", locked ? "true" : "false");
     fprintf(fp, "  \"frames\": %d,\n", frames);
     fprintf(fp, "  \"bad_frames\": %d,\n", bad_frames);
-    if (signal_present) {
+    if (bad_frame_rate_valid) {
         fprintf(fp, "  \"bad_frame_rate\": %.9f,\n", bad_frame_rate);
     } else {
         fprintf(fp, "  \"bad_frame_rate\": null,\n");
@@ -649,6 +650,9 @@ static int run_adaptive_quality(const Config *cfg, FrontendFilter *frontend, Mat
     int adaptive_sync_bit_drops = 0;
     int adaptive_last_stat_frame = 0;
     int adaptive_last_json_frame = 0;
+    int bad_rate_base_frames = 0;
+    int bad_rate_base_bad_frames = 0;
+    int bad_rate_have_lock_base = 0;
     int adaptive_no_faw_chunks = 0;
     int adaptive_resets = 0;
     StationIdState station_id;
@@ -867,12 +871,33 @@ static int run_adaptive_quality(const Config *cfg, FrontendFilter *frontend, Mat
                         best_stream_errors <= (int)(best_stream_hits * 2);
                     const char *rx_status = locked ? "locked" : (signal_present ? "unlocked" : "idle");
                     if (json_due) {
+                        int bad_frame_rate_valid = 0;
+                        double bad_frame_rate = 0.0;
+                        if (locked) {
+                            if (bad_rate_have_lock_base) {
+                                int rate_frames = adaptive_frames - bad_rate_base_frames;
+                                int rate_bad_frames = adaptive_bad_frames - bad_rate_base_bad_frames;
+                                if (rate_frames > 0) {
+                                    bad_frame_rate = (double)rate_bad_frames / (double)rate_frames;
+                                    bad_frame_rate_valid = 1;
+                                }
+                            }
+                            bad_rate_base_frames = adaptive_frames;
+                            bad_rate_base_bad_frames = adaptive_bad_frames;
+                            bad_rate_have_lock_base = 1;
+                        } else {
+                            bad_rate_base_frames = adaptive_frames;
+                            bad_rate_base_bad_frames = adaptive_bad_frames;
+                            bad_rate_have_lock_base = 0;
+                        }
                         write_status_json(
                             cfg,
                             best_stats,
                             rx_status,
                             signal_present,
                             locked,
+                            bad_frame_rate_valid,
+                            bad_frame_rate,
                             adaptive_frames,
                             adaptive_bad_frames,
                             pending_conceal_frames,

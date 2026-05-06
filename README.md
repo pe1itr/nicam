@@ -669,10 +669,11 @@ tools/websdr-nicam-rx
 
 De JSON bevat onder andere `rx_status`, `signal_present`, `locked`,
 `station_id`, `bad_frame_rate`, `slicer_conf`, `carrier_hz`, `omega`, frame
-counters en sync/drop counters. `bad_frame_rate` is `null` zolang er geen
-signaalstructuur aanwezig is. De statuspagina toont `STOPPED` wanneer de JSON
-ontbreekt of te oud is, `IDLE` wanneer de ontvanger draait maar geen bruikbaar
-signaal ziet, en `LOCKED`/`UNLOCKED` wanneer er wel signaalstructuur aanwezig is.
+counters en sync/drop counters. `bad_frame_rate` wordt over het recente locked
+interval berekend en is `null` zolang de ontvanger niet locked is. De
+statuspagina toont `STOPPED` wanneer de JSON ontbreekt of te oud is, `IDLE`
+wanneer de ontvanger draait maar geen bruikbaar signaal ziet, en
+`LOCKED`/`UNLOCKED` wanneer er wel signaalstructuur aanwezig is.
 
 Voor een eenvoudig dashboard staat er een statische pagina in:
 
