@@ -1,5 +1,6 @@
 #define _POSIX_C_SOURCE 200809L
 
+#include <ctype.h>
 #include <errno.h>
 #include <iio.h>
 #include <math.h>
@@ -39,10 +40,16 @@ typedef enum {
 
 typedef struct {
     const char *uri;
+    const char *connect_mode;
+    const char *ip;
+    const char *usb_uri;
     const char *pcm_path;
     const char *iq_out_path;
+    char resolved_uri[256];
     long long lo_hz;
-    long long sample_rate;
+    long long baseband_sample_rate;
+    long long tx_sample_rate;
+    int tx_sample_rate_explicit;
     long long rf_bandwidth;
     double tx_gain;
     double tx_amplitude;
@@ -78,6 +85,23 @@ typedef struct {
     double *hist_i;
     double *hist_q;
 } RrcShaper;
+
+typedef struct {
+    long long input_rate;
+    long long output_rate;
+    long long interp;
+    long long decim;
+    long long input_consumed;
+    long long output_generated;
+    int taps_per_side;
+    int taps_len;
+    double *taps;
+    int16_t *tail_i;
+    int16_t *tail_q;
+    size_t tail_len;
+} SincResampler;
+
+static double sinc1(double x);
 
 static void handle_signal(int sig) {
     (void)sig;
@@ -124,8 +148,10 @@ static void sleep_until(double target) {
 
 static void usage(const char *prog) {
     fprintf(stderr,
-            "Gebruik: %s --lo HZ [--source tone|silence|pcm] [--pcm-in FILE|-] "
-            "[--sample-rate HZ] [--tx-gain DB] [--rf-bandwidth HZ] "
+            "Gebruik: %s --lo HZ [--connect-mode network|usb|auto] [--ip A.B.C.D] [--usb-uri URI] "
+            "[--source tone|silence|pcm] [--pcm-in FILE|-] "
+            "[--baseband-sample-rate HZ] [--tx-sample-rate HZ] [--sample-rate HZ] "
+            "[--tx-gain DB] [--rf-bandwidth HZ] "
             "[--tx-amplitude A] [--nicam-rf-level 0..1023] [--tone-hz HZ] "
             "[--pulse-rolloff R] [--pulse-span-symbols N] [--no-pulse-shape] "
             "[--buffer-frames N] [--kernel-buffers N] [--station-id TEXT] "
@@ -176,6 +202,149 @@ static int write_ll_attr(struct iio_channel *chn, const char *attr, long long va
     return ret;
 }
 
+static long long gcd_ll(long long a, long long b) {
+    if (a < 0) {
+        a = -a;
+    }
+    if (b < 0) {
+        b = -b;
+    }
+    while (b != 0) {
+        long long t = a % b;
+        a = b;
+        b = t;
+    }
+    return a == 0 ? 1 : a;
+}
+
+static int init_resampler(SincResampler *rs, long long input_rate, long long output_rate) {
+    memset(rs, 0, sizeof(*rs));
+    if (input_rate <= 0 || output_rate <= 0) {
+        return -1;
+    }
+    long long g = gcd_ll(input_rate, output_rate);
+    rs->input_rate = input_rate;
+    rs->output_rate = output_rate;
+    rs->interp = output_rate / g;
+    rs->decim = input_rate / g;
+    rs->taps_per_side = 16;
+    rs->taps_len = rs->taps_per_side * 2;
+    rs->tail_len = (size_t)rs->taps_per_side;
+    rs->taps = calloc((size_t)rs->interp * (size_t)rs->taps_len, sizeof(double));
+    rs->tail_i = calloc(rs->tail_len, sizeof(int16_t));
+    rs->tail_q = calloc(rs->tail_len, sizeof(int16_t));
+    if (rs->taps == NULL || rs->tail_i == NULL || rs->tail_q == NULL) {
+        free(rs->taps);
+        free(rs->tail_i);
+        free(rs->tail_q);
+        memset(rs, 0, sizeof(*rs));
+        return -1;
+    }
+    for (long long phase = 0; phase < rs->interp; phase++) {
+        double frac = (double)phase / (double)rs->interp;
+        double norm = 0.0;
+        double *phase_taps = rs->taps + (size_t)phase * (size_t)rs->taps_len;
+        for (int k = -rs->taps_per_side + 1; k <= rs->taps_per_side; k++) {
+            int tap_index = k + rs->taps_per_side - 1;
+            double x = frac - (double)k;
+            double window_pos = (double)tap_index / (double)(rs->taps_len - 1);
+            double window = 0.5 - 0.5 * cos(2.0 * M_PI * window_pos);
+            double tap = sinc1(x) * window;
+            phase_taps[tap_index] = tap;
+            norm += tap;
+        }
+        if (fabs(norm) > 1.0e-12) {
+            for (int tap_index = 0; tap_index < rs->taps_len; tap_index++) {
+                phase_taps[tap_index] /= norm;
+            }
+        }
+    }
+    return 0;
+}
+
+static void free_resampler(SincResampler *rs) {
+    free(rs->taps);
+    free(rs->tail_i);
+    free(rs->tail_q);
+    memset(rs, 0, sizeof(*rs));
+}
+
+static int16_t resampler_sample_at(const SincResampler *rs, const int16_t *in, size_t in_samples, long long abs_index, int is_q) {
+    long long chunk_start = rs->input_consumed;
+    long long chunk_end = chunk_start + (long long)in_samples;
+    if (abs_index < chunk_start) {
+        long long tail_index = (long long)rs->tail_len - (chunk_start - abs_index);
+        if (tail_index >= 0 && tail_index < (long long)rs->tail_len) {
+            return is_q ? rs->tail_q[tail_index] : rs->tail_i[tail_index];
+        }
+        return in_samples > 0 ? in[0] : 0;
+    }
+    if (abs_index >= chunk_end) {
+        return in_samples > 0 ? in[in_samples - 1] : 0;
+    }
+    return in[abs_index - chunk_start];
+}
+
+static double sinc_interp_one(const SincResampler *rs, const int16_t *in, size_t in_samples, long long center, long long phase, int is_q) {
+    double acc = 0.0;
+    const double *phase_taps = rs->taps + (size_t)phase * (size_t)rs->taps_len;
+    for (int k = -rs->taps_per_side + 1; k <= rs->taps_per_side; k++) {
+        int tap_index = k + rs->taps_per_side - 1;
+        long long idx = center + k;
+        acc += phase_taps[tap_index] * (double)resampler_sample_at(rs, in, in_samples, idx, is_q);
+    }
+    return acc;
+}
+
+static void resampler_store_tail(SincResampler *rs, const int16_t *in_i, const int16_t *in_q, size_t in_samples) {
+    if (rs->tail_len == 0) {
+        return;
+    }
+    if (in_samples >= rs->tail_len) {
+        memcpy(rs->tail_i, in_i + in_samples - rs->tail_len, rs->tail_len * sizeof(int16_t));
+        memcpy(rs->tail_q, in_q + in_samples - rs->tail_len, rs->tail_len * sizeof(int16_t));
+        return;
+    }
+    size_t keep = rs->tail_len - in_samples;
+    memmove(rs->tail_i, rs->tail_i + in_samples, keep * sizeof(int16_t));
+    memmove(rs->tail_q, rs->tail_q + in_samples, keep * sizeof(int16_t));
+    memcpy(rs->tail_i + keep, in_i, in_samples * sizeof(int16_t));
+    memcpy(rs->tail_q + keep, in_q, in_samples * sizeof(int16_t));
+}
+
+static size_t resample_iq_block(
+    SincResampler *rs,
+    const int16_t *in_i,
+    const int16_t *in_q,
+    size_t in_samples,
+    int16_t *out_i,
+    int16_t *out_q,
+    size_t out_samples
+) {
+    if (rs->input_rate == rs->output_rate) {
+        size_t n = in_samples < out_samples ? in_samples : out_samples;
+        memcpy(out_i, in_i, n * sizeof(int16_t));
+        memcpy(out_q, in_q, n * sizeof(int16_t));
+        rs->input_consumed += (long long)in_samples;
+        rs->output_generated += (long long)n;
+        resampler_store_tail(rs, in_i, in_q, in_samples);
+        return n;
+    }
+
+    for (size_t n = 0; n < out_samples; n++) {
+        long long out_abs = rs->output_generated + (long long)n;
+        long long pos_num = out_abs * rs->decim;
+        long long center = pos_num / rs->interp;
+        long long phase = pos_num % rs->interp;
+        out_i[n] = clamp_i16(lrint(sinc_interp_one(rs, in_i, in_samples, center, phase, 0)));
+        out_q[n] = clamp_i16(lrint(sinc_interp_one(rs, in_q, in_samples, center, phase, 1)));
+    }
+    rs->input_consumed += (long long)in_samples;
+    rs->output_generated += (long long)out_samples;
+    resampler_store_tail(rs, in_i, in_q, in_samples);
+    return out_samples;
+}
+
 static int write_double_attr(struct iio_channel *chn, const char *attr, double value) {
     char text[64];
     snprintf(text, sizeof(text), "%.6f", value);
@@ -184,6 +353,222 @@ static int write_double_attr(struct iio_channel *chn, const char *attr, double v
         fprintf(stderr, "Kan %s niet zetten op %s: %s\n", attr, text, strerror(-ret));
     }
     return ret;
+}
+
+static int attr_list_contains_ll(const char *text, long long value) {
+    const char *p = text;
+    while (*p != '\0') {
+        while (*p != '\0' && !isdigit((unsigned char)*p) && *p != '-') {
+            p++;
+        }
+        if (*p == '\0') {
+            break;
+        }
+        errno = 0;
+        char *end = NULL;
+        long long first = strtoll(p, &end, 10);
+        if (end == p || errno != 0) {
+            p++;
+            continue;
+        }
+        p = end;
+        while (*p != '\0' && isspace((unsigned char)*p)) {
+            p++;
+        }
+        if (*p == '-') {
+            p++;
+            errno = 0;
+            long long last = strtoll(p, &end, 10);
+            if (end != p && errno == 0) {
+                if (value >= first && value <= last) {
+                    return 1;
+                }
+                p = end;
+                continue;
+            }
+        }
+        if (value == first) {
+            return 1;
+        }
+    }
+    return 0;
+}
+
+static int attr_list_choose_rate(const char *text, long long minimum, long long *chosen) {
+    const char *p = text;
+    long long best = 0;
+    while (*p != '\0') {
+        while (*p != '\0' && !isdigit((unsigned char)*p) && *p != '-') {
+            p++;
+        }
+        if (*p == '\0') {
+            break;
+        }
+        errno = 0;
+        char *end = NULL;
+        long long first = strtoll(p, &end, 10);
+        if (end == p || errno != 0) {
+            p++;
+            continue;
+        }
+        p = end;
+        while (*p != '\0' && isspace((unsigned char)*p)) {
+            p++;
+        }
+        long long candidate = first;
+        if (*p == '-') {
+            p++;
+            errno = 0;
+            long long last = strtoll(p, &end, 10);
+            if (end != p && errno == 0) {
+                if (minimum >= first && minimum <= last) {
+                    candidate = minimum;
+                } else if (first >= minimum) {
+                    candidate = first;
+                } else {
+                    candidate = 0;
+                }
+                p = end;
+            }
+        } else if (candidate < minimum) {
+            candidate = 0;
+        }
+        if (candidate > 0 && (best == 0 || candidate < best)) {
+            best = candidate;
+        }
+    }
+    if (best == 0) {
+        return -1;
+    }
+    *chosen = best;
+    return 0;
+}
+
+static int read_sampling_frequency_available(struct iio_channel *primary, struct iio_channel *fallback, char *buf, size_t buf_len) {
+    ssize_t ret = iio_channel_attr_read(primary, "sampling_frequency_available", buf, buf_len);
+    if (ret >= 0) {
+        if ((size_t)ret >= buf_len) {
+            buf[buf_len - 1] = '\0';
+        }
+        return 0;
+    }
+    if (fallback != NULL) {
+        ret = iio_channel_attr_read(fallback, "sampling_frequency_available", buf, buf_len);
+        if (ret >= 0) {
+            if ((size_t)ret >= buf_len) {
+                buf[buf_len - 1] = '\0';
+            }
+            return 0;
+        }
+    }
+    return -1;
+}
+
+static int resolve_tx_sample_rate(
+    struct iio_channel *tx_phy,
+    struct iio_channel *tx_i,
+    long long baseband_rate,
+    long long requested_rate,
+    int requested_explicit,
+    long long *resolved_rate
+) {
+    char available[1024];
+    memset(available, 0, sizeof(available));
+    if (read_sampling_frequency_available(tx_phy, tx_i, available, sizeof(available)) < 0) {
+        *resolved_rate = requested_explicit ? requested_rate : baseband_rate;
+        fprintf(stderr,
+                "Waarschuwing: sampling_frequency_available niet leesbaar; probeer Pluto/IIO TX sample-rate %lld Hz\n",
+                *resolved_rate);
+        return 0;
+    }
+
+    if (requested_explicit) {
+        if (!attr_list_contains_ll(available, requested_rate)) {
+            fprintf(stderr,
+                    "Gevraagde Pluto/IIO TX sample-rate %lld Hz wordt niet ondersteund. sampling_frequency_available: %s\n",
+                    requested_rate, available);
+            return -1;
+        }
+        *resolved_rate = requested_rate;
+        return 0;
+    }
+
+    if (attr_list_contains_ll(available, baseband_rate)) {
+        *resolved_rate = baseband_rate;
+        fprintf(stderr,
+                "nicam_pluto_tx: auto TX sample-rate kiest baseband-rate %lld Hz; apparaat ondersteunt: %s\n",
+                *resolved_rate, available);
+        return 0;
+    }
+
+    if (attr_list_choose_rate(available, baseband_rate, resolved_rate) < 0) {
+        fprintf(stderr,
+                "Geen geschikte Pluto/IIO TX sample-rate gevonden voor NICAM baseband %lld Hz. sampling_frequency_available: %s\n",
+                baseband_rate, available);
+        return -1;
+    }
+    fprintf(stderr,
+            "nicam_pluto_tx: auto TX sample-rate kiest %lld Hz omdat baseband-rate %lld Hz niet door dit apparaat wordt ondersteund. sampling_frequency_available: %s\n",
+            *resolved_rate, baseband_rate, available);
+    return 0;
+}
+
+static int resolve_iio_uri(Config *cfg) {
+    if (cfg->uri != NULL) {
+        snprintf(cfg->resolved_uri, sizeof(cfg->resolved_uri), "%s", cfg->uri);
+        return 0;
+    }
+    if (strcmp(cfg->connect_mode, "network") == 0) {
+        if (cfg->ip == NULL || cfg->ip[0] == '\0') {
+            fprintf(stderr, "NICAM TX connect mode network vereist een IP-adres (--ip / NICAM_TX_IP)\n");
+            return -1;
+        }
+        snprintf(cfg->resolved_uri, sizeof(cfg->resolved_uri), "ip:%s", cfg->ip);
+        return 0;
+    }
+    if (strcmp(cfg->connect_mode, "usb") == 0) {
+        const char *usb_uri = (cfg->usb_uri != NULL && cfg->usb_uri[0] != '\0') ? cfg->usb_uri : "usb:";
+        snprintf(cfg->resolved_uri, sizeof(cfg->resolved_uri), "%s", usb_uri);
+        return 0;
+    }
+    if (strcmp(cfg->connect_mode, "auto") == 0) {
+        snprintf(cfg->resolved_uri, sizeof(cfg->resolved_uri), "auto");
+        return 0;
+    }
+    fprintf(stderr, "Onbekende NICAM TX connect mode %s; gebruik network, usb of auto\n", cfg->connect_mode);
+    return -1;
+}
+
+static struct iio_context *open_iio_context(const Config *cfg) {
+    if (strcmp(cfg->connect_mode, "auto") == 0 && cfg->uri == NULL) {
+        return iio_create_default_context();
+    }
+    return iio_create_context_from_uri(cfg->resolved_uri);
+}
+
+static void log_iio_device_model(struct iio_context *ctx, struct iio_device *phy) {
+    const char *model = iio_context_get_attr_value(ctx, "hw_model");
+    if (model == NULL) {
+        model = iio_context_get_attr_value(ctx, "model");
+    }
+    if (model != NULL && model[0] != '\0') {
+        fprintf(stderr, "nicam_pluto_tx: device model=%s\n", model);
+        return;
+    }
+
+    char phy_model[128];
+    memset(phy_model, 0, sizeof(phy_model));
+    if (phy != NULL && iio_device_attr_read(phy, "model", phy_model, sizeof(phy_model)) >= 0 && phy_model[0] != '\0') {
+        fprintf(stderr, "nicam_pluto_tx: device model=%s\n", phy_model);
+        return;
+    }
+
+    const char *ctx_name = iio_context_get_name(ctx);
+    const char *phy_name = phy != NULL ? iio_device_get_name(phy) : NULL;
+    fprintf(stderr, "nicam_pluto_tx: device model=%s%s%s\n",
+            ctx_name != NULL ? ctx_name : "unknown",
+            phy_name != NULL ? "/" : "",
+            phy_name != NULL ? phy_name : "");
 }
 
 static void init_scramble(void) {
@@ -617,11 +1002,16 @@ static void generate_frame(
 }
 
 static int parse_args(int argc, char **argv, Config *cfg) {
-    cfg->uri = "ip:192.168.2.1";
+    cfg->uri = NULL;
+    cfg->connect_mode = "network";
+    cfg->ip = "192.168.2.1";
+    cfg->usb_uri = "usb:";
     cfg->pcm_path = "-";
     cfg->iq_out_path = NULL;
     cfg->lo_hz = 0;
-    cfg->sample_rate = SAMPLE_RATE_DEFAULT;
+    cfg->baseband_sample_rate = SAMPLE_RATE_DEFAULT;
+    cfg->tx_sample_rate = 0;
+    cfg->tx_sample_rate_explicit = 0;
     cfg->rf_bandwidth = 1750000;
     cfg->tx_gain = 0.0;
     cfg->tx_amplitude = 3.0;
@@ -643,10 +1033,22 @@ static int parse_args(int argc, char **argv, Config *cfg) {
     for (int i = 1; i < argc; i++) {
         if (strcmp(argv[i], "--uri") == 0 && i + 1 < argc) {
             cfg->uri = argv[++i];
+        } else if (strcmp(argv[i], "--connect-mode") == 0 && i + 1 < argc) {
+            cfg->connect_mode = argv[++i];
+        } else if (strcmp(argv[i], "--ip") == 0 && i + 1 < argc) {
+            cfg->ip = argv[++i];
+        } else if (strcmp(argv[i], "--usb-uri") == 0 && i + 1 < argc) {
+            cfg->usb_uri = argv[++i];
         } else if (strcmp(argv[i], "--lo") == 0 && i + 1 < argc) {
             cfg->lo_hz = atoll(argv[++i]);
         } else if (strcmp(argv[i], "--sample-rate") == 0 && i + 1 < argc) {
-            cfg->sample_rate = atoll(argv[++i]);
+            cfg->baseband_sample_rate = atoll(argv[++i]);
+        } else if (strcmp(argv[i], "--baseband-sample-rate") == 0 && i + 1 < argc) {
+            cfg->baseband_sample_rate = atoll(argv[++i]);
+        } else if ((strcmp(argv[i], "--tx-sample-rate") == 0 ||
+                    strcmp(argv[i], "--device-sample-rate") == 0) && i + 1 < argc) {
+            cfg->tx_sample_rate = atoll(argv[++i]);
+            cfg->tx_sample_rate_explicit = 1;
         } else if (strcmp(argv[i], "--tx-gain") == 0 && i + 1 < argc) {
             cfg->tx_gain = atof(argv[++i]);
         } else if (strcmp(argv[i], "--rf-bandwidth") == 0 && i + 1 < argc) {
@@ -713,12 +1115,22 @@ static int parse_args(int argc, char **argv, Config *cfg) {
         }
     }
 
-    if (cfg->sample_rate != SAMPLE_RATE_DEFAULT) {
-        fprintf(stderr, "Alleen sample-rate %d wordt nu native ondersteund\n", SAMPLE_RATE_DEFAULT);
+    if (cfg->baseband_sample_rate != SAMPLE_RATE_DEFAULT) {
+        fprintf(stderr, "Alleen NICAM baseband sample-rate %d wordt ondersteund; wijzig de TX device sample-rate voor Pluto/IIO\n", SAMPLE_RATE_DEFAULT);
         return -1;
+    }
+    if (cfg->tx_sample_rate_explicit && cfg->tx_sample_rate <= 0) {
+        fprintf(stderr, "TX device sample-rate moet groter zijn dan nul\n");
+        return -1;
+    }
+    if (!cfg->tx_sample_rate_explicit) {
+        cfg->tx_sample_rate = cfg->baseband_sample_rate;
     }
     if (cfg->lo_hz <= 0 && cfg->iq_out_path == NULL) {
         usage(argv[0]);
+        return -1;
+    }
+    if (resolve_iio_uri(cfg) < 0) {
         return -1;
     }
     if (cfg->buffer_frames == 0) {
@@ -737,7 +1149,7 @@ static int run_iq_file(Config *cfg, FILE *pcm_fp) {
     J17Filter j17;
     j17_init(&j17);
     RrcShaper shaper;
-    if (rrc_init(&shaper, cfg->pulse_shape, (int)(cfg->sample_rate / SYMBOL_RATE),
+    if (rrc_init(&shaper, cfg->pulse_shape, (int)(cfg->baseband_sample_rate / SYMBOL_RATE),
                  cfg->pulse_rolloff, cfg->pulse_span_symbols) < 0) {
         fprintf(stderr, "Kan RRC pulse shaper niet initialiseren\n");
         fclose(out);
@@ -794,9 +1206,10 @@ int main(int argc, char **argv) {
         return ret;
     }
 
-    struct iio_context *ctx = iio_create_context_from_uri(cfg.uri);
+    fprintf(stderr, "nicam_pluto_tx: connect mode=%s resolved IIO URI=%s\n", cfg.connect_mode, cfg.resolved_uri);
+    struct iio_context *ctx = open_iio_context(&cfg);
     if (ctx == NULL) {
-        fprintf(stderr, "Kan IIO context niet openen voor %s\n", cfg.uri);
+        fprintf(stderr, "Kan IIO context niet openen voor %s\n", cfg.resolved_uri);
         if (pcm_fp != stdin) {
             fclose(pcm_fp);
         }
@@ -813,6 +1226,7 @@ int main(int argc, char **argv) {
         }
         return 1;
     }
+    log_iio_device_model(ctx, phy);
 
     struct iio_channel *tx_lo = iio_device_find_channel(phy, "altvoltage1", true);
     struct iio_channel *tx_phy = iio_device_find_channel(phy, "voltage0", true);
@@ -827,8 +1241,22 @@ int main(int argc, char **argv) {
         return 1;
     }
 
+    if (resolve_tx_sample_rate(tx_phy, tx_i, cfg.baseband_sample_rate, cfg.tx_sample_rate,
+                               cfg.tx_sample_rate_explicit, &cfg.tx_sample_rate) < 0) {
+        iio_context_destroy(ctx);
+        if (pcm_fp != stdin) {
+            fclose(pcm_fp);
+        }
+        return 1;
+    }
+    long long rate_gcd = gcd_ll(cfg.baseband_sample_rate, cfg.tx_sample_rate);
+    fprintf(stderr,
+            "nicam_pluto_tx: NICAM baseband sample rate=%lld Hz, Pluto/IIO TX sample rate=%lld Hz, resampler=%lld/%lld, RF bandwidth=%lld Hz\n",
+            cfg.baseband_sample_rate, cfg.tx_sample_rate,
+            cfg.tx_sample_rate / rate_gcd, cfg.baseband_sample_rate / rate_gcd, cfg.rf_bandwidth);
+
     if (write_ll_attr(tx_lo, "frequency", cfg.lo_hz) < 0 ||
-        write_ll_attr(tx_phy, "sampling_frequency", cfg.sample_rate) < 0 ||
+        write_ll_attr(tx_phy, "sampling_frequency", cfg.tx_sample_rate) < 0 ||
         write_ll_attr(tx_phy, "rf_bandwidth", cfg.rf_bandwidth) < 0 ||
         write_double_attr(tx_phy, "hardwaregain", cfg.tx_gain) < 0) {
         iio_context_destroy(ctx);
@@ -847,8 +1275,9 @@ int main(int argc, char **argv) {
         }
     }
 
-    size_t buffer_samples = cfg.buffer_frames * IQ_SAMPLES_PER_FRAME;
-    struct iio_buffer *buf = iio_device_create_buffer(tx, buffer_samples, false);
+    size_t baseband_buffer_samples = cfg.buffer_frames * IQ_SAMPLES_PER_FRAME;
+    size_t device_buffer_samples = (size_t)(((long long)baseband_buffer_samples * cfg.tx_sample_rate + cfg.baseband_sample_rate - 1) / cfg.baseband_sample_rate);
+    struct iio_buffer *buf = iio_device_create_buffer(tx, device_buffer_samples, false);
     if (buf == NULL) {
         fprintf(stderr, "Kan TX-buffer niet maken\n");
         iio_context_destroy(ctx);
@@ -858,12 +1287,16 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    int16_t *iq_i = malloc(buffer_samples * sizeof(int16_t));
-    int16_t *iq_q = malloc(buffer_samples * sizeof(int16_t));
-    if (iq_i == NULL || iq_q == NULL) {
+    int16_t *iq_i = malloc(baseband_buffer_samples * sizeof(int16_t));
+    int16_t *iq_q = malloc(baseband_buffer_samples * sizeof(int16_t));
+    int16_t *tx_i_buf = malloc(device_buffer_samples * sizeof(int16_t));
+    int16_t *tx_q_buf = malloc(device_buffer_samples * sizeof(int16_t));
+    if (iq_i == NULL || iq_q == NULL || tx_i_buf == NULL || tx_q_buf == NULL) {
         perror("malloc");
         free(iq_i);
         free(iq_q);
+        free(tx_i_buf);
+        free(tx_q_buf);
         iio_buffer_destroy(buf);
         iio_context_destroy(ctx);
         if (pcm_fp != stdin) {
@@ -875,11 +1308,13 @@ int main(int argc, char **argv) {
     J17Filter j17;
     j17_init(&j17);
     RrcShaper shaper;
-    if (rrc_init(&shaper, cfg.pulse_shape, (int)(cfg.sample_rate / SYMBOL_RATE),
+    if (rrc_init(&shaper, cfg.pulse_shape, (int)(cfg.baseband_sample_rate / SYMBOL_RATE),
                  cfg.pulse_rolloff, cfg.pulse_span_symbols) < 0) {
         fprintf(stderr, "Kan RRC pulse shaper niet initialiseren\n");
         free(iq_i);
         free(iq_q);
+        free(tx_i_buf);
+        free(tx_q_buf);
         iio_buffer_destroy(buf);
         iio_context_destroy(ctx);
         if (pcm_fp != stdin) {
@@ -888,13 +1323,28 @@ int main(int argc, char **argv) {
         return 1;
     }
     int phase_quarter = 0;
+    SincResampler resampler;
+    if (init_resampler(&resampler, cfg.baseband_sample_rate, cfg.tx_sample_rate) < 0) {
+        fprintf(stderr, "Kan TX-resampler niet initialiseren\n");
+        free(iq_i);
+        free(iq_q);
+        free(tx_i_buf);
+        free(tx_q_buf);
+        rrc_free(&shaper);
+        iio_buffer_destroy(buf);
+        iio_context_destroy(ctx);
+        if (pcm_fp != stdin) {
+            fclose(pcm_fp);
+        }
+        return 1;
+    }
     long long buffers_sent = 0;
     long long frames_sent = 0;
     long long samples_sent = 0;
     long long max_frames = cfg.seconds > 0 ? (long long)cfg.seconds * 1000 : 0;
     double start_time = monotonic_seconds();
     double next_push_time = start_time;
-    double buffer_seconds = (double)buffer_samples / (double)cfg.sample_rate;
+    double buffer_seconds = (double)device_buffer_samples / (double)cfg.tx_sample_rate;
 
     while (!stop_requested) {
         size_t frames_this = cfg.buffer_frames;
@@ -914,13 +1364,25 @@ int main(int argc, char **argv) {
             memset(iq_q + f * IQ_SAMPLES_PER_FRAME, 0, IQ_SAMPLES_PER_FRAME * sizeof(int16_t));
         }
 
+        size_t baseband_samples_this = frames_this * IQ_SAMPLES_PER_FRAME;
+        size_t device_samples_this = (size_t)(((long long)baseband_samples_this * cfg.tx_sample_rate) / cfg.baseband_sample_rate);
+        if (device_samples_this > device_buffer_samples) {
+            device_samples_this = device_buffer_samples;
+        }
+        size_t resampled = resample_iq_block(&resampler, iq_i, iq_q, baseband_samples_this,
+                                             tx_i_buf, tx_q_buf, device_samples_this);
+        if (resampled < device_buffer_samples) {
+            memset(tx_i_buf + resampled, 0, (device_buffer_samples - resampled) * sizeof(int16_t));
+            memset(tx_q_buf + resampled, 0, (device_buffer_samples - resampled) * sizeof(int16_t));
+        }
+
         char *pi = iio_buffer_first(buf, tx_i);
         char *pq = iio_buffer_first(buf, tx_q);
         ptrdiff_t step = iio_buffer_step(buf);
         char *end = iio_buffer_end(buf);
-        for (size_t n = 0; n < buffer_samples && pi < end && pq < end; n++) {
-            *(int16_t *)pi = iq_i[n];
-            *(int16_t *)pq = iq_q[n];
+        for (size_t n = 0; n < device_buffer_samples && pi < end && pq < end; n++) {
+            *(int16_t *)pi = tx_i_buf[n];
+            *(int16_t *)pq = tx_q_buf[n];
             pi += step;
             pq += step;
         }
@@ -936,7 +1398,7 @@ int main(int argc, char **argv) {
 
         buffers_sent++;
         frames_sent += (long long)frames_this;
-        samples_sent += (long long)(frames_this * IQ_SAMPLES_PER_FRAME);
+        samples_sent += (long long)resampled;
         if (cfg.realtime) {
             next_push_time += buffer_seconds;
             double now = monotonic_seconds();
@@ -946,7 +1408,7 @@ int main(int argc, char **argv) {
         }
         if (cfg.status_every > 0 && buffers_sent % cfg.status_every == 0) {
             double elapsed = monotonic_seconds() - start_time;
-            double nominal = (double)samples_sent / (double)cfg.sample_rate;
+            double nominal = (double)samples_sent / (double)cfg.tx_sample_rate;
             fprintf(stderr,
                     "nicam_pluto_tx: buffers=%lld frames=%lld samples=%lld "
                     "elapsed=%.2f nominal=%.2f realtime=%d source=%d\n",
@@ -960,6 +1422,9 @@ int main(int argc, char **argv) {
 
     free(iq_i);
     free(iq_q);
+    free(tx_i_buf);
+    free(tx_q_buf);
+    free_resampler(&resampler);
     rrc_free(&shaper);
     iio_buffer_destroy(buf);
     iio_context_destroy(ctx);

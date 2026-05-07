@@ -16,7 +16,11 @@ fi
 
 NICAM_TX_LO_HZ="${NICAM_TX_LO_HZ:-2324000000}"
 NICAM_TX_GAIN_DB="${NICAM_TX_GAIN_DB:--10}"
-NICAM_TX_SAMPLE_RATE="${NICAM_TX_SAMPLE_RATE:-1456000}"
+NICAM_TX_CONNECT_MODE="${NICAM_TX_CONNECT_MODE:-network}"
+NICAM_TX_IP="${NICAM_TX_IP:-192.168.2.1}"
+NICAM_TX_USB_URI="${NICAM_TX_USB_URI:-usb:}"
+NICAM_BASEBAND_SAMPLE_RATE="${NICAM_BASEBAND_SAMPLE_RATE:-1456000}"
+NICAM_TX_DEVICE_SAMPLE_RATE="${NICAM_TX_DEVICE_SAMPLE_RATE:-${NICAM_TX_SAMPLE_RATE:-}}"
 NICAM_TX_RF_BANDWIDTH="${NICAM_TX_RF_BANDWIDTH:-750000}"
 NICAM_TX_AMPLITUDE="${NICAM_TX_AMPLITUDE:-0.8}"
 NICAM_TX_RF_LEVEL="${NICAM_TX_RF_LEVEL:-200}"
@@ -31,7 +35,27 @@ NICAM_TX_STATION_ID="${NICAM_TX_STATION_ID:-}"
 NICAM_TX_PCM_TIMEOUT_MS="${NICAM_TX_PCM_TIMEOUT_MS:-120}"
 NICAM_PLUTO_EXTRA_ARGS="${NICAM_PLUTO_EXTRA_ARGS:-}"
 
-echo "tim-nicam-tx: env=${ENV_FILE} lo=${NICAM_TX_LO_HZ} Hz gain=${NICAM_TX_GAIN_DB} source=${NICAM_TX_SOURCE} rf_level=${NICAM_TX_RF_LEVEL}" >&2
+if [[ -n "${NICAM_TX_DEVICE_SAMPLE_RATE}" ]]; then
+  tx_rate_label="${NICAM_TX_DEVICE_SAMPLE_RATE}"
+else
+  tx_rate_label="auto"
+fi
+case "${NICAM_TX_CONNECT_MODE}" in
+  network)
+    resolved_iio_uri="ip:${NICAM_TX_IP}"
+    ;;
+  usb)
+    resolved_iio_uri="${NICAM_TX_USB_URI:-usb:}"
+    ;;
+  auto)
+    resolved_iio_uri="auto"
+    ;;
+  *)
+    echo "tim-nicam-tx: onbekende NICAM_TX_CONNECT_MODE=${NICAM_TX_CONNECT_MODE}; gebruik network, usb of auto" >&2
+    exit 2
+    ;;
+esac
+echo "tim-nicam-tx: env=${ENV_FILE} connect_mode=${NICAM_TX_CONNECT_MODE} iio_uri=${resolved_iio_uri} lo=${NICAM_TX_LO_HZ} Hz gain=${NICAM_TX_GAIN_DB} source=${NICAM_TX_SOURCE} baseband_rate=${NICAM_BASEBAND_SAMPLE_RATE} tx_rate=${tx_rate_label} rf_bw=${NICAM_TX_RF_BANDWIDTH} rf_level=${NICAM_TX_RF_LEVEL}" >&2
 
 if [[ ! -x "${REPO_DIR}/nicam-pluto-tx" ]]; then
   echo "tim-nicam-tx: bouw eerst ${REPO_DIR}/nicam-pluto-tx met tools/build-nicam-pluto-tx" >&2
@@ -39,8 +63,11 @@ if [[ ! -x "${REPO_DIR}/nicam-pluto-tx" ]]; then
 fi
 
 native_args=(
+  --connect-mode "${NICAM_TX_CONNECT_MODE}"
+  --ip "${NICAM_TX_IP}"
+  --usb-uri "${NICAM_TX_USB_URI}"
   --lo "${NICAM_TX_LO_HZ}"
-  --sample-rate "${NICAM_TX_SAMPLE_RATE}"
+  --baseband-sample-rate "${NICAM_BASEBAND_SAMPLE_RATE}"
   --tx-gain "${NICAM_TX_GAIN_DB}"
   --rf-bandwidth "${NICAM_TX_RF_BANDWIDTH}"
   --tx-amplitude "${NICAM_TX_AMPLITUDE}"
@@ -49,6 +76,9 @@ native_args=(
   --pulse-span-symbols "${NICAM_TX_PULSE_SPAN_SYMBOLS}"
   --pcm-timeout-ms "${NICAM_TX_PCM_TIMEOUT_MS}"
 )
+if [[ -n "${NICAM_TX_DEVICE_SAMPLE_RATE}" ]]; then
+  native_args+=(--tx-sample-rate "${NICAM_TX_DEVICE_SAMPLE_RATE}")
+fi
 if [[ "${NICAM_TX_PULSE_SHAPE}" == "0" ]]; then
   native_args+=(--no-pulse-shape)
 fi
