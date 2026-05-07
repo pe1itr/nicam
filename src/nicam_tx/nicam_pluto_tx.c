@@ -93,6 +93,8 @@ typedef struct {
     long long decim;
     long long input_consumed;
     long long output_generated;
+    long long input_index;
+    long long phase;
     int16_t *tail_i;
     int16_t *tail_q;
     size_t tail_len;
@@ -258,16 +260,11 @@ static int16_t resampler_sample_at(const SincResampler *rs, const int16_t *in, s
     return in[abs_index - chunk_start];
 }
 
-static double cubic_interp_one(const SincResampler *rs, const int16_t *in, size_t in_samples, long long center, long long phase, int is_q) {
+static double linear_interp_one(const SincResampler *rs, const int16_t *in, size_t in_samples, long long center, long long phase, int is_q) {
     double frac = (double)phase / (double)rs->interp;
-    double y0 = (double)resampler_sample_at(rs, in, in_samples, center - 1, is_q);
-    double y1 = (double)resampler_sample_at(rs, in, in_samples, center, is_q);
-    double y2 = (double)resampler_sample_at(rs, in, in_samples, center + 1, is_q);
-    double y3 = (double)resampler_sample_at(rs, in, in_samples, center + 2, is_q);
-    double a0 = -0.5 * y0 + 1.5 * y1 - 1.5 * y2 + 0.5 * y3;
-    double a1 = y0 - 2.5 * y1 + 2.0 * y2 - 0.5 * y3;
-    double a2 = -0.5 * y0 + 0.5 * y2;
-    return ((a0 * frac + a1) * frac + a2) * frac + y1;
+    double y0 = (double)resampler_sample_at(rs, in, in_samples, center, is_q);
+    double y1 = (double)resampler_sample_at(rs, in, in_samples, center + 1, is_q);
+    return y0 + (y1 - y0) * frac;
 }
 
 static void resampler_store_tail(SincResampler *rs, const int16_t *in_i, const int16_t *in_q, size_t in_samples) {
@@ -305,14 +302,19 @@ static size_t resample_iq_block(
         return n;
     }
 
+    long long center = rs->input_index;
+    long long phase = rs->phase;
     for (size_t n = 0; n < out_samples; n++) {
-        long long out_abs = rs->output_generated + (long long)n;
-        long long pos_num = out_abs * rs->decim;
-        long long center = pos_num / rs->interp;
-        long long phase = pos_num % rs->interp;
-        out_i[n] = clamp_i16(lrint(cubic_interp_one(rs, in_i, in_samples, center, phase, 0)));
-        out_q[n] = clamp_i16(lrint(cubic_interp_one(rs, in_q, in_samples, center, phase, 1)));
+        out_i[n] = clamp_i16(lrint(linear_interp_one(rs, in_i, in_samples, center, phase, 0)));
+        out_q[n] = clamp_i16(lrint(linear_interp_one(rs, in_q, in_samples, center, phase, 1)));
+        phase += rs->decim;
+        while (phase >= rs->interp) {
+            phase -= rs->interp;
+            center++;
+        }
     }
+    rs->input_index = center;
+    rs->phase = phase;
     rs->input_consumed += (long long)in_samples;
     rs->output_generated += (long long)out_samples;
     resampler_store_tail(rs, in_i, in_q, in_samples);
