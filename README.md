@@ -194,15 +194,15 @@ Met de C-decoder kun je hetzelfde IQ-bestand terugluisteren:
 
 ### Huidige NICAM TX-praktijksetup
 
-Voor live zenden is de voorkeursopzet nu een constante lokale audiobus in de
-zender. De TX-clock blijft altijd lopen; externe audio wordt via UDP op de bus
-gezet. Als er geen UDP-packets binnenkomen, zendt de NICAM-keten stilte en
-blijven de frames/IQ-samples doorlopen.
+Voor live zenden draait de C-zender met een doorlopende TX-clock. De launcher
+kan audio uit een internetstream, bestand, UDP raw PCM, toon of stilte halen. Bij
+PCM-bronnen gebruikt de C-zender een korte timeout; als de bron tijdelijk niets
+levert, blijft de NICAM-keten stilte en frames/IQ-samples doorsturen.
 
-Normaal starten op `tim`:
+Normaal starten op `tim` met de profieldefaults:
 
 ```sh
-NICAM_TX_SOURCE=udp NICAM_TX_UDP_URL=udp://0.0.0.0:7355 tools/tim-nicam-tx
+tools/tim-nicam-tx
 ```
 
 Digital Baseband V1.4-compatible station-ID in de NICAM additional-data bits:
@@ -214,9 +214,11 @@ NICAM_TX_STATION_ID=PE1ITR tools/tim-nicam-tx
 Alleen de eerste 8 ASCII-tekens worden gebruikt. De mapping is:
 `AD0..AD2 = tekenpositie 0..7`, `AD3..AD10 = ASCII-teken`.
 
-Een bron naar de zender sturen:
+Een bron via UDP naar de zender sturen:
 
 ```sh
+NICAM_TX_SOURCE=udp NICAM_TX_UDP_URL=udp://0.0.0.0:7355 tools/tim-nicam-tx
+
 ffmpeg -hide_banner -loglevel error -re -i input \
   -vn -ac 2 -ar 32000 -f s16le \
   'udp://zender-ip:7355?pkt_size=1024'
@@ -235,8 +237,13 @@ Belangrijk:
 De relevante profieldefaults staan in `config/environments/tim.env.example`:
 
 ```sh
-NICAM_TX_SOURCE=stream              # zet live op udp
+NICAM_TX_SOURCE=stream
+NICAM_TX_STREAM_URL=https://icecast.omroep.nl/radio2-bb-aac
 NICAM_TX_UDP_URL=udp://0.0.0.0:7355
+NICAM_TX_CONNECT_MODE=network
+NICAM_TX_IP=192.168.2.1
+NICAM_BASEBAND_SAMPLE_RATE=1456000
+NICAM_TX_DEVICE_SAMPLE_RATE=        # leeg = auto
 NICAM_TX_PULSE_SHAPE=1
 NICAM_TX_PULSE_ROLLOFF=0.4
 NICAM_TX_PULSE_SPAN_SYMBOLS=6
@@ -244,21 +251,10 @@ NICAM_TX_PULSE_SPAN_SYMBOLS=6
 
 Referentiemetingen:
 
-- C TX/RX bit-error sweep, SNR `0..14 dB` in stappen van `0.5 dB`
-  (`7,280,000` uitgezonden bits; bad frames en gemiste frames tellen als
-  bitfouten):
-
-  ![NICAM C TX/RX bit error vs SNR](artifacts/nicam-snr-loop-2026-05-05/nicam-c-rx-bit-error-snr-0-14-step-0.5-2026-05-05.png)
-- C TX-spectrum van dezelfde PRBS-bron, 1.5 MHz span, relatieve schaal
-  `0..-45 dB`:
-
-  ![NICAM C TX spectrum, 1.5 MHz span](artifacts/nicam-snr-loop-2026-05-05/nicam-tx-spectrum-1p5mhz-relative-2026-05-06.png)
-- Decoder threshold, final filter vs baseline:
-  `artifacts/nicam-final/nicam-final-lpf49-425k-error-percent-vs-baseline-latest.png`
-- Final spectrum, 2 MHz span tot `-40 dB`:
-  `artifacts/nicam-final/nicam-final-lpf49-425k-spectrum-2mhz-latest.png`
-- Klikpuls-delayverdeling:
-  `artifacts/nicam-snr-sweep-30s/nicam-click-delay-split.png`
+De repo bevat scripts en code om spectrum- en BER-metingen opnieuw te draaien,
+maar gegenereerde plots/IQ-bestanden onder `artifacts/` worden niet meer in git
+opgenomen. Dat houdt de publieke repository klein en voorkomt dat meetopnames of
+grote testbestanden naar GitHub worden gepusht.
 
 ## PlutoSDR uitzenden
 
@@ -292,14 +288,38 @@ Belangrijke Pluto-opties:
 
 Er worden twee PlutoSDR-achtige TX-paden ondersteund:
 
-- ADALM-Pluto/PlutoSDR met firmware die `1456000` samples/s op de IIO TX-stream
-  accepteert. De zender gebruikt dan automatisch de lage device sample-rate, zodat
-  de USB/netwerkstream zo licht mogelijk blijft.
-- OpenSourceSDRLab Pluto-compatible AD9361/Z7020 boards. Sommige firmware meldt
-  alleen rates zoals `3840000` of een bereik zoals `[2083333 1 61440000]`. De
-  NICAM timing blijft intern `1456000`, maar de zender resamplet de uiteindelijke
-  complex baseband stream naar een ondersteunde Pluto/IIO sample-rate. De
-  voorkeursrate voor dit pad is `3840000`, met resampler-ratio `240/91`.
+- ADALM-Pluto/PlutoSDR firmware die de native NICAM-rate `1456000` samples/s op
+  de IIO TX-stream accepteert. De zender gebruikt dan automatisch die lage
+  device sample-rate, zodat de USB/netwerkstream zo licht mogelijk blijft.
+- Pluto-achtige firmware die `1456000` weigert of alleen een bereik meldt, zoals
+  `[2083333 1 61440000]`. De NICAM timing blijft intern `1456000`, maar de
+  zender resamplet de uiteindelijke complex baseband stream naar een werkende
+  Pluto/IIO sample-rate.
+
+In auto-mode kiest de software eerst de native `1456000` als die echt wordt
+geaccepteerd. Als die rate door de driver wordt geweigerd, valt hij terug naar
+een lagere bruikbare device-rate. Voor de huidige Rev.B/Rev.C Pluto-tests met
+rangevorm `[2083333 1 61440000]` is de automatische fallback `2184000`
+samples/s, met resampler-ratio `3/2`. Dit bleek stabieler en lichter dan
+`3840000`. Handmatig is `2730000` (`15/8`) aan de TX-kant mooi stabiel getest.
+Hogere rates zoals `2912000` (`2/1`), `3276000` (`9/4`) en vooral `3840000`
+(`240/91`) zitten dichter tegen de USB/libiio transportlimiet en moeten per
+setup opnieuw worden beoordeeld.
+
+Praktisch getest aan de TX-kant:
+
+- Analog Devices PlutoSDR Rev.B (`Z7010-AD9364`), via USB/libiio. Deze Pluto
+  rapporteerde een rangevorm `sampling_frequency_available: [2083333 1
+  61440000]`; `1456000` werd door de driver geweigerd. Auto valt daarom terug
+  naar `2184000` en resamplet `1456000 -> 2184000` met ratio `3/2`.
+- Analog Devices PlutoSDR Rev.C / OpenSourceSDRLab Pluto-compatible
+  (`Z7020-AD9361`), via USB/libiio. Stabiel getest met auto op `2184000` en
+  handmatig met `NICAM_TX_DEVICE_SAMPLE_RATE=2730000`. Dat is op deze hardware
+  de hoogste rate waarmee tot nu toe mooie stabiele resultaten zijn gezien.
+- Dezelfde Rev.C / OpenSourceSDRLab hardware via 100 Mbit Ethernet/libiio is
+  functioneel bereikbaar, maar de `iio_buffer_push` transporttijd was in de
+  praktijk te hoog voor stabiele realtime TX. USB gaf duidelijk betere
+  resultaten.
 
 De standaard launcher gebruikt netwerk:
 
@@ -328,12 +348,18 @@ tools/tim-nicam-tx
 ```
 
 Laat `NICAM_TX_DEVICE_SAMPLE_RATE` normaal leeg. De zender leest
-`sampling_frequency_available`, kiest `1456000` als dat kan, en valt anders terug
-op een ondersteunde hogere TX-rate zoals `3840000`. Expliciet forceren kan met:
+`sampling_frequency_available`, probeert waar zinvol `1456000`, en valt anders
+terug op een ondersteunde hogere TX-rate zoals `2184000`. Expliciet forceren kan
+met:
 
 ```sh
-NICAM_TX_DEVICE_SAMPLE_RATE=3840000 tools/tim-nicam-tx
+NICAM_TX_DEVICE_SAMPLE_RATE=2730000 tools/tim-nicam-tx
 ```
+
+De startup-log meldt altijd de NICAM baseband sample-rate, de gekozen Pluto/IIO
+TX sample-rate, de resampler-ratio, RF-bandbreedte, connect mode en resolved IIO
+URI. Bij performanceonderzoek print de zender ook `profile_ms_per_buffer`, waar
+`push` de libiio/transporttijd is.
 
 Voor een korte offline test kun je eerst IQ maken:
 
@@ -637,11 +663,11 @@ of netwerk bereikbaar is.
 
 ## Systemd user-service (RTL-SDR ontvanger)
 
-Voor een installatie waar de repo in `~/nicam-transmitter` staat:
+Voor een installatie waar de repo in `~/nicam` staat:
 
 ```sh
 mkdir -p ~/.config/systemd/user
-cp ~/nicam-transmitter/systemd/user/nicam-rx.service ~/.config/systemd/user/
+cp ~/nicam/systemd/user/nicam-rx.service ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now nicam-rx.service
 ```
