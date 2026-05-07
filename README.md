@@ -40,7 +40,7 @@ gelezen:
 ./nicam-rx --iq-format s16 --sample-rate 1456000 < input.cs16 > output.pcm
 ```
 
-Compileren:
+Compileren van de C-ontvanger:
 
 ```sh
 make
@@ -58,6 +58,22 @@ De Makefile gebruikt alleen een C compiler en `libm`. Op Debian/Ubuntu/Odroid:
 sudo apt install build-essential rtl-sdr alsa-utils
 make
 ```
+
+Compileren van de PlutoSDR C-zender:
+
+```sh
+sudo apt install build-essential libiio-dev ffmpeg
+tools/build-nicam-pluto-tx
+```
+
+Dit bouwt:
+
+```sh
+./nicam-pluto-tx
+```
+
+De zender gebruikt libiio voor PlutoSDR/AD9361 toegang. Voor normale TX op
+`tim` verwacht `tools/tim-nicam-tx` dat `./nicam-pluto-tx` al gebouwd is.
 
 De C-code is gewone C11 en bevat geen x86-specifieke intrinsics. Hij is bedoeld
 om ook op ARM64/Odroid te compileren met `gcc` of `clang`.
