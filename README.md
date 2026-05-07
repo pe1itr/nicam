@@ -783,6 +783,19 @@ De huidige `websdr`-default schrijft direct naar
 `/var/www/html/nicam/nicam-rx-status.json`. Zorg dat deze directory bestaat en
 schrijfbaar is voor de user waaronder de systemd user-service draait.
 
+## Roadmap
+
+De huidige keten is bruikbaar voor live experimenten, maar de DQPSK-demodulator
+is nog een belangrijk verbeterpunt. Geplande RX-verbeteringen:
+
+- Robuustere carrier-lock voor meer marge bij frequentie-offset en fase-ruis.
+- Betere timing-lock/symbol timing recovery, vooral bij lagere SNR en minder
+  ideale sampleclock.
+- Verbetering van de QPSK slicer, inclusief evaluatie van soft-decision metrics
+  in plaats van alleen hard decisions.
+- Meer meetbare regressietests voor lockgedrag, bad-frame-rate en audio-uitval
+  bij gecontroleerde SNR, offset en timingfouten.
+
 ## Referenties
 
 - ETSI ETS 300 163 (NICAM 728, Nov 1994): https://www.etsi.org/deliver/etsi_i_ets/300100_300199/300163/01_60/ets_300163e01p.pdf
