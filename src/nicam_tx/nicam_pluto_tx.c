@@ -244,29 +244,6 @@ static void free_resampler(SincResampler *rs) {
     memset(rs, 0, sizeof(*rs));
 }
 
-static int16_t resampler_sample_at(const SincResampler *rs, const int16_t *in, size_t in_samples, long long abs_index, int is_q) {
-    long long chunk_start = rs->input_consumed;
-    long long chunk_end = chunk_start + (long long)in_samples;
-    if (abs_index < chunk_start) {
-        long long tail_index = (long long)rs->tail_len - (chunk_start - abs_index);
-        if (tail_index >= 0 && tail_index < (long long)rs->tail_len) {
-            return is_q ? rs->tail_q[tail_index] : rs->tail_i[tail_index];
-        }
-        return in_samples > 0 ? in[0] : 0;
-    }
-    if (abs_index >= chunk_end) {
-        return in_samples > 0 ? in[in_samples - 1] : 0;
-    }
-    return in[abs_index - chunk_start];
-}
-
-static double linear_interp_one(const SincResampler *rs, const int16_t *in, size_t in_samples, long long center, long long phase, int is_q) {
-    double frac = (double)phase / (double)rs->interp;
-    double y0 = (double)resampler_sample_at(rs, in, in_samples, center, is_q);
-    double y1 = (double)resampler_sample_at(rs, in, in_samples, center + 1, is_q);
-    return y0 + (y1 - y0) * frac;
-}
-
 static void resampler_store_tail(SincResampler *rs, const int16_t *in_i, const int16_t *in_q, size_t in_samples) {
     if (rs->tail_len == 0) {
         return;
@@ -304,12 +281,21 @@ static size_t resample_iq_block(
 
     long long center = rs->input_index;
     long long phase = rs->phase;
+    long long chunk_start = rs->input_consumed;
+    long long interp = rs->interp;
+    long long decim = rs->decim;
     for (size_t n = 0; n < out_samples; n++) {
-        out_i[n] = clamp_i16(lrint(linear_interp_one(rs, in_i, in_samples, center, phase, 0)));
-        out_q[n] = clamp_i16(lrint(linear_interp_one(rs, in_q, in_samples, center, phase, 1)));
-        phase += rs->decim;
-        while (phase >= rs->interp) {
-            phase -= rs->interp;
+        size_t j = (size_t)(center - chunk_start);
+        size_t j1 = j + 1 < in_samples ? j + 1 : j;
+        long long i0 = in_i[j];
+        long long i1 = in_i[j1];
+        long long q0 = in_q[j];
+        long long q1 = in_q[j1];
+        out_i[n] = (int16_t)(i0 + ((i1 - i0) * phase + interp / 2) / interp);
+        out_q[n] = (int16_t)(q0 + ((q1 - q0) * phase + interp / 2) / interp);
+        phase += decim;
+        if (phase >= interp) {
+            phase -= interp;
             center++;
         }
     }
