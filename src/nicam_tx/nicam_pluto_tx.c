@@ -356,6 +356,14 @@ static int write_double_attr(struct iio_channel *chn, const char *attr, double v
 }
 
 static int attr_list_contains_ll(const char *text, long long value) {
+    long long range_min = 0;
+    long long range_step = 0;
+    long long range_max = 0;
+    if (sscanf(text, " [ %lld %lld %lld ]", &range_min, &range_step, &range_max) == 3 &&
+        range_step > 0 && range_min <= range_max) {
+        return value >= range_min && value <= range_max && ((value - range_min) % range_step) == 0;
+    }
+
     const char *p = text;
     while (*p != '\0') {
         while (*p != '\0' && !isdigit((unsigned char)*p) && *p != '-') {
@@ -395,6 +403,33 @@ static int attr_list_contains_ll(const char *text, long long value) {
 }
 
 static int attr_list_choose_rate(const char *text, long long minimum, long long *chosen) {
+    long long range_min = 0;
+    long long range_step = 0;
+    long long range_max = 0;
+    if (sscanf(text, " [ %lld %lld %lld ]", &range_min, &range_step, &range_max) == 3 &&
+        range_step > 0 && range_min <= range_max) {
+        const long long preferred[] = {3840000, 30720000};
+        for (size_t i = 0; i < sizeof(preferred) / sizeof(preferred[0]); i++) {
+            long long rate = preferred[i];
+            if (rate >= minimum && rate >= range_min && rate <= range_max &&
+                ((rate - range_min) % range_step) == 0) {
+                *chosen = rate;
+                return 0;
+            }
+        }
+
+        long long candidate = minimum > range_min ? minimum : range_min;
+        long long rem = (candidate - range_min) % range_step;
+        if (rem != 0) {
+            candidate += range_step - rem;
+        }
+        if (candidate <= range_max) {
+            *chosen = candidate;
+            return 0;
+        }
+        return -1;
+    }
+
     const char *p = text;
     long long best = 0;
     while (*p != '\0') {

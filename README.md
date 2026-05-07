@@ -278,13 +278,62 @@ tools/tim-nicam-tx
 Belangrijke Pluto-opties:
 
 - `--lo`: RF-carrier in Hz
-- `--uri`: standaard `ip:192.168.2.1`
-- `--sample-rate`: standaard `1456000`
+- `--connect-mode`: `network`, `usb` of `auto`; standaard `network`
+- `--ip`: netwerkadres bij `--connect-mode network`, standaard `192.168.2.1`
+- `--usb-uri`: USB URI bij `--connect-mode usb`, standaard `usb:`
+- `--baseband-sample-rate`: logische NICAM sample-rate, standaard `1456000`
+- `--tx-sample-rate`: Pluto/IIO device sample-rate; standaard auto
+- `--uri`: handmatige libiio URI override, bijvoorbeeld `ip:192.168.2.1`
 - `--tx-gain`: Pluto TX hardware gain/attenuation in dB, begin laag, bijvoorbeeld `-40` tot `-30`
 - `--rf-bandwidth`: standaard `750000`
 - `--source`: `tone`, `silence` of `pcm`
 - `--pcm-in`: raw stereo `s16le` audio op `32 kHz`, of `-` voor stdin
 - `--iq-out`: schrijf test-IQ naar bestand in plaats van Pluto TX
+
+Er worden twee PlutoSDR-achtige TX-paden ondersteund:
+
+- ADALM-Pluto/PlutoSDR met firmware die `1456000` samples/s op de IIO TX-stream
+  accepteert. De zender gebruikt dan automatisch de lage device sample-rate, zodat
+  de USB/netwerkstream zo licht mogelijk blijft.
+- OpenSourceSDRLab Pluto-compatible AD9361/Z7020 boards. Sommige firmware meldt
+  alleen rates zoals `3840000` of een bereik zoals `[2083333 1 61440000]`. De
+  NICAM timing blijft intern `1456000`, maar de zender resamplet de uiteindelijke
+  complex baseband stream naar een ondersteunde Pluto/IIO sample-rate. De
+  voorkeursrate voor dit pad is `3840000`, met resampler-ratio `240/91`.
+
+De standaard launcher gebruikt netwerk:
+
+```sh
+NICAM_TX_CONNECT_MODE=network \
+NICAM_TX_IP=192.168.2.1 \
+NICAM_TX_SOURCE=stream \
+NICAM_TX_STATION_ID=PE1ITR \
+NICAM_TX_GAIN_DB=-6 \
+NICAM_TX_AMPLITUDE=3.0 \
+NICAM_TX_RF_BANDWIDTH=1750000 \
+tools/tim-nicam-tx
+```
+
+Via USB:
+
+```sh
+NICAM_TX_CONNECT_MODE=usb \
+NICAM_TX_USB_URI=usb: \
+NICAM_TX_SOURCE=stream \
+NICAM_TX_STATION_ID=PE1ITR \
+NICAM_TX_GAIN_DB=-6 \
+NICAM_TX_AMPLITUDE=3.0 \
+NICAM_TX_RF_BANDWIDTH=1750000 \
+tools/tim-nicam-tx
+```
+
+Laat `NICAM_TX_DEVICE_SAMPLE_RATE` normaal leeg. De zender leest
+`sampling_frequency_available`, kiest `1456000` als dat kan, en valt anders terug
+op een ondersteunde hogere TX-rate zoals `3840000`. Expliciet forceren kan met:
+
+```sh
+NICAM_TX_DEVICE_SAMPLE_RATE=3840000 tools/tim-nicam-tx
+```
 
 Voor een korte offline test kun je eerst IQ maken:
 
