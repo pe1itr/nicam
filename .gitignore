@@ -63,6 +63,7 @@ artifacts/*
 !artifacts/nicam-snr-loop-*/
 !artifacts/nicam-snr-loop-*/*.png
 !artifacts/nicam-snr-loop-*/*.csv
+artifacts/nicam-snr-loop-2026-05-05/nicam-tx-spectrum-2mhz-relative-2026-05-05.png
 docs/
 /nicam
 /nicam-rx
