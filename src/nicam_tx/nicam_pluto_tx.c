@@ -93,9 +93,6 @@ typedef struct {
     long long decim;
     long long input_consumed;
     long long output_generated;
-    int taps_per_side;
-    int taps_len;
-    double *taps;
     int16_t *tail_i;
     int16_t *tail_q;
     size_t tail_len;
@@ -227,43 +224,19 @@ static int init_resampler(SincResampler *rs, long long input_rate, long long out
     rs->output_rate = output_rate;
     rs->interp = output_rate / g;
     rs->decim = input_rate / g;
-    rs->taps_per_side = 16;
-    rs->taps_len = rs->taps_per_side * 2;
-    rs->tail_len = (size_t)rs->taps_per_side;
-    rs->taps = calloc((size_t)rs->interp * (size_t)rs->taps_len, sizeof(double));
+    rs->tail_len = 2;
     rs->tail_i = calloc(rs->tail_len, sizeof(int16_t));
     rs->tail_q = calloc(rs->tail_len, sizeof(int16_t));
-    if (rs->taps == NULL || rs->tail_i == NULL || rs->tail_q == NULL) {
-        free(rs->taps);
+    if (rs->tail_i == NULL || rs->tail_q == NULL) {
         free(rs->tail_i);
         free(rs->tail_q);
         memset(rs, 0, sizeof(*rs));
         return -1;
     }
-    for (long long phase = 0; phase < rs->interp; phase++) {
-        double frac = (double)phase / (double)rs->interp;
-        double norm = 0.0;
-        double *phase_taps = rs->taps + (size_t)phase * (size_t)rs->taps_len;
-        for (int k = -rs->taps_per_side + 1; k <= rs->taps_per_side; k++) {
-            int tap_index = k + rs->taps_per_side - 1;
-            double x = frac - (double)k;
-            double window_pos = (double)tap_index / (double)(rs->taps_len - 1);
-            double window = 0.5 - 0.5 * cos(2.0 * M_PI * window_pos);
-            double tap = sinc1(x) * window;
-            phase_taps[tap_index] = tap;
-            norm += tap;
-        }
-        if (fabs(norm) > 1.0e-12) {
-            for (int tap_index = 0; tap_index < rs->taps_len; tap_index++) {
-                phase_taps[tap_index] /= norm;
-            }
-        }
-    }
     return 0;
 }
 
 static void free_resampler(SincResampler *rs) {
-    free(rs->taps);
     free(rs->tail_i);
     free(rs->tail_q);
     memset(rs, 0, sizeof(*rs));
@@ -285,15 +258,16 @@ static int16_t resampler_sample_at(const SincResampler *rs, const int16_t *in, s
     return in[abs_index - chunk_start];
 }
 
-static double sinc_interp_one(const SincResampler *rs, const int16_t *in, size_t in_samples, long long center, long long phase, int is_q) {
-    double acc = 0.0;
-    const double *phase_taps = rs->taps + (size_t)phase * (size_t)rs->taps_len;
-    for (int k = -rs->taps_per_side + 1; k <= rs->taps_per_side; k++) {
-        int tap_index = k + rs->taps_per_side - 1;
-        long long idx = center + k;
-        acc += phase_taps[tap_index] * (double)resampler_sample_at(rs, in, in_samples, idx, is_q);
-    }
-    return acc;
+static double cubic_interp_one(const SincResampler *rs, const int16_t *in, size_t in_samples, long long center, long long phase, int is_q) {
+    double frac = (double)phase / (double)rs->interp;
+    double y0 = (double)resampler_sample_at(rs, in, in_samples, center - 1, is_q);
+    double y1 = (double)resampler_sample_at(rs, in, in_samples, center, is_q);
+    double y2 = (double)resampler_sample_at(rs, in, in_samples, center + 1, is_q);
+    double y3 = (double)resampler_sample_at(rs, in, in_samples, center + 2, is_q);
+    double a0 = -0.5 * y0 + 1.5 * y1 - 1.5 * y2 + 0.5 * y3;
+    double a1 = y0 - 2.5 * y1 + 2.0 * y2 - 0.5 * y3;
+    double a2 = -0.5 * y0 + 0.5 * y2;
+    return ((a0 * frac + a1) * frac + a2) * frac + y1;
 }
 
 static void resampler_store_tail(SincResampler *rs, const int16_t *in_i, const int16_t *in_q, size_t in_samples) {
@@ -336,8 +310,8 @@ static size_t resample_iq_block(
         long long pos_num = out_abs * rs->decim;
         long long center = pos_num / rs->interp;
         long long phase = pos_num % rs->interp;
-        out_i[n] = clamp_i16(lrint(sinc_interp_one(rs, in_i, in_samples, center, phase, 0)));
-        out_q[n] = clamp_i16(lrint(sinc_interp_one(rs, in_q, in_samples, center, phase, 1)));
+        out_i[n] = clamp_i16(lrint(cubic_interp_one(rs, in_i, in_samples, center, phase, 0)));
+        out_q[n] = clamp_i16(lrint(cubic_interp_one(rs, in_q, in_samples, center, phase, 1)));
     }
     rs->input_consumed += (long long)in_samples;
     rs->output_generated += (long long)out_samples;
