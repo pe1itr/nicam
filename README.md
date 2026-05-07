@@ -853,10 +853,6 @@ is nog een belangrijk verbeterpunt. Geplande RX-verbeteringen:
 - ETSI ETS 300 163 (NICAM 728, Nov 1994): https://www.etsi.org/deliver/etsi_i_ets/300100_300199/300163/01_60/ets_300163e01p.pdf
 - ETSI EN 300 163 V1.2.1 (Mar 1998, catalogus): https://standards.iteh.ai/catalog/standards/etsi/60810122-7c6b-44ed-9196-311b7673a79c/etsi-ets-300-163-ed-1-1994-11
 
-De huidige defaults gebruiken `1.456 MS/s` en `364 ksym/s`, dus 4 samples per
-symbool. Dat is breder dan strikt nodig voor 128 kbit/s Opus, maar sluit aan op
-de bestaande SDR-pijplijn en houdt de eerste timing eenvoudig.
-
 ## Licentie
 
 Dit project is gelicentieerd onder de Apache License, Version 2.0. Zie
