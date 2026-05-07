@@ -95,6 +95,7 @@ typedef struct {
     long long output_generated;
     long long input_index;
     long long phase;
+    int32_t *frac_q15;
     int16_t *tail_i;
     int16_t *tail_q;
     size_t tail_len;
@@ -227,18 +228,24 @@ static int init_resampler(SincResampler *rs, long long input_rate, long long out
     rs->interp = output_rate / g;
     rs->decim = input_rate / g;
     rs->tail_len = 2;
+    rs->frac_q15 = calloc((size_t)rs->interp, sizeof(int32_t));
     rs->tail_i = calloc(rs->tail_len, sizeof(int16_t));
     rs->tail_q = calloc(rs->tail_len, sizeof(int16_t));
-    if (rs->tail_i == NULL || rs->tail_q == NULL) {
+    if (rs->frac_q15 == NULL || rs->tail_i == NULL || rs->tail_q == NULL) {
+        free(rs->frac_q15);
         free(rs->tail_i);
         free(rs->tail_q);
         memset(rs, 0, sizeof(*rs));
         return -1;
     }
+    for (long long phase = 0; phase < rs->interp; phase++) {
+        rs->frac_q15[phase] = (int32_t)((phase * 32768 + rs->interp / 2) / rs->interp);
+    }
     return 0;
 }
 
 static void free_resampler(SincResampler *rs) {
+    free(rs->frac_q15);
     free(rs->tail_i);
     free(rs->tail_q);
     memset(rs, 0, sizeof(*rs));
@@ -282,17 +289,17 @@ static size_t resample_iq_block(
     long long center = rs->input_index;
     long long phase = rs->phase;
     long long chunk_start = rs->input_consumed;
-    long long interp = rs->interp;
     long long decim = rs->decim;
+    long long interp = rs->interp;
+    const int32_t *frac_q15 = rs->frac_q15;
     for (size_t n = 0; n < out_samples; n++) {
         size_t j = (size_t)(center - chunk_start);
         size_t j1 = j + 1 < in_samples ? j + 1 : j;
-        long long i0 = in_i[j];
-        long long i1 = in_i[j1];
-        long long q0 = in_q[j];
-        long long q1 = in_q[j1];
-        out_i[n] = (int16_t)(i0 + ((i1 - i0) * phase + interp / 2) / interp);
-        out_q[n] = (int16_t)(q0 + ((q1 - q0) * phase + interp / 2) / interp);
+        int32_t frac = frac_q15[phase];
+        int32_t i0 = in_i[j];
+        int32_t q0 = in_q[j];
+        out_i[n] = (int16_t)(i0 + ((((int32_t)in_i[j1] - i0) * frac + 16384) >> 15));
+        out_q[n] = (int16_t)(q0 + ((((int32_t)in_q[j1] - q0) * frac + 16384) >> 15));
         phase += decim;
         if (phase >= interp) {
             phase -= interp;
@@ -461,7 +468,21 @@ static int read_sampling_frequency_available(struct iio_channel *primary, struct
     return -1;
 }
 
+static int context_model_matches(struct iio_context *ctx, const char *needle) {
+    const char *model = iio_context_get_attr_value(ctx, "hw_model");
+    if (model != NULL && strstr(model, needle) != NULL) {
+        return 1;
+    }
+    model = iio_context_get_attr_value(ctx, "model");
+    return model != NULL && strstr(model, needle) != NULL;
+}
+
+static int context_prefers_native_nicam_rate(struct iio_context *ctx) {
+    return context_model_matches(ctx, "Z7010") || context_model_matches(ctx, "AD9364");
+}
+
 static int resolve_tx_sample_rate(
+    struct iio_context *ctx,
     struct iio_channel *tx_phy,
     struct iio_channel *tx_i,
     long long baseband_rate,
@@ -481,6 +502,13 @@ static int resolve_tx_sample_rate(
 
     if (requested_explicit) {
         if (!attr_list_contains_ll(available, requested_rate)) {
+            if (context_prefers_native_nicam_rate(ctx) && requested_rate == baseband_rate) {
+                fprintf(stderr,
+                        "nicam_pluto_tx: gevraagde TX sample-rate %lld Hz staat niet in sampling_frequency_available, maar dit Pluto-model gebruikt de native NICAM-rate toch: %s\n",
+                        requested_rate, available);
+                *resolved_rate = requested_rate;
+                return 0;
+            }
             fprintf(stderr,
                     "Gevraagde Pluto/IIO TX sample-rate %lld Hz wordt niet ondersteund. sampling_frequency_available: %s\n",
                     requested_rate, available);
@@ -494,6 +522,13 @@ static int resolve_tx_sample_rate(
         *resolved_rate = baseband_rate;
         fprintf(stderr,
                 "nicam_pluto_tx: auto TX sample-rate kiest baseband-rate %lld Hz; apparaat ondersteunt: %s\n",
+                *resolved_rate, available);
+        return 0;
+    }
+    if (context_prefers_native_nicam_rate(ctx)) {
+        *resolved_rate = baseband_rate;
+        fprintf(stderr,
+                "nicam_pluto_tx: auto TX sample-rate kiest native NICAM-rate %lld Hz voor dit Pluto-model, ondanks sampling_frequency_available: %s\n",
                 *resolved_rate, available);
         return 0;
     }
@@ -1238,7 +1273,7 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    if (resolve_tx_sample_rate(tx_phy, tx_i, cfg.baseband_sample_rate, cfg.tx_sample_rate,
+    if (resolve_tx_sample_rate(ctx, tx_phy, tx_i, cfg.baseband_sample_rate, cfg.tx_sample_rate,
                                cfg.tx_sample_rate_explicit, &cfg.tx_sample_rate) < 0) {
         iio_context_destroy(ctx);
         if (pcm_fp != stdin) {
