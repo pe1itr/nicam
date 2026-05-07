@@ -4,14 +4,14 @@ After=default.target
 
 [Service]
 Type=simple
-WorkingDirectory=%h/nicam-transmitter
-ExecStart=%h/nicam-transmitter/systemd/user/nicam-rx.sh
+WorkingDirectory=%h/nicam
+ExecStart=%h/nicam/systemd/user/nicam-rx.sh
 Restart=always
 RestartSec=2
 Environment=PYTHONUNBUFFERED=1
 Environment=NICAM_ENV=websdr
 # Optional:
-# Environment=NICAM_ENV_FILE=%h/nicam-transmitter/config/environments/websdr.env
+# Environment=NICAM_ENV_FILE=%h/nicam/config/environments/websdr.env
 
 [Install]
 WantedBy=default.target
