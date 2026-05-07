@@ -1317,6 +1317,22 @@ int main(int argc, char **argv) {
         }
         return 1;
     }
+    if (cfg.tx_sample_rate < cfg.rf_bandwidth) {
+        long long pre_bw = cfg.tx_sample_rate / 2;
+        if (pre_bw < 200000) {
+            pre_bw = cfg.tx_sample_rate;
+        }
+        fprintf(stderr,
+                "nicam_pluto_tx: zet RF bandwidth tijdelijk op %lld Hz voordat sampling_frequency %lld Hz wordt gezet\n",
+                pre_bw, cfg.tx_sample_rate);
+        if (write_ll_attr(tx_phy, "rf_bandwidth", pre_bw) < 0) {
+            iio_context_destroy(ctx);
+            if (pcm_fp != stdin) {
+                fclose(pcm_fp);
+            }
+            return 1;
+        }
+    }
     if (write_ll_attr(tx_phy, "sampling_frequency", cfg.tx_sample_rate) < 0) {
         if (cfg.tx_sample_rate_explicit ||
             choose_fallback_tx_sample_rate(tx_phy, tx_i, cfg.baseband_sample_rate,
