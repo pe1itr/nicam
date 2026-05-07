@@ -59,7 +59,10 @@ config/environments/*.env
 *.pcm
 *.npy
 .codex
-artifacts/
+artifacts/*
+!artifacts/nicam-snr-loop-*/
+!artifacts/nicam-snr-loop-*/*.png
+!artifacts/nicam-snr-loop-*/*.csv
 docs/
 /nicam
 /nicam-rx

@@ -306,12 +306,26 @@ NICAM_TX_PULSE_ROLLOFF=0.4
 NICAM_TX_PULSE_SPAN_SYMBOLS=6
 ```
 
-Referentiemetingen:
+Referentiemetingen uit de C TX/RX loop-test:
 
-De repo bevat scripts en code om spectrum- en BER-metingen opnieuw te draaien,
-maar gegenereerde plots/IQ-bestanden onder `artifacts/` worden niet meer in git
-opgenomen. Dat houdt de publieke repository klein en voorkomt dat meetopnames of
-grote testbestanden naar GitHub worden gepusht.
+- C TX/RX bit-error sweep, SNR `0..14 dB` in stappen van `0.5 dB`.
+  Per meetpunt zijn `10,000` NICAM-frames getest (`7,280,000` bits). Bad frames
+  en gemiste frames tellen mee als bitfouten. In deze meting wordt de keten
+  bruikbaar rond `6.5-7 dB` SNR en vrijwel foutloos vanaf ongeveer `8.5-10 dB`.
+
+  ![NICAM C TX/RX bit error vs SNR](artifacts/nicam-snr-loop-2026-05-05/nicam-c-rx-bit-error-snr-0-14-step-0.5-2026-05-05.png)
+
+- C TX-spectrum van dezelfde PRBS-bron, relatieve schaal. Dit laat zien wat je
+  van de RRC-vormgegeven directe DQPSK TX verwacht in een `1.5 MHz` en `2 MHz`
+  span.
+
+  ![NICAM C TX spectrum, 1.5 MHz span](artifacts/nicam-snr-loop-2026-05-05/nicam-tx-spectrum-1p5mhz-relative-2026-05-06.png)
+
+  ![NICAM C TX spectrum, 2 MHz span](artifacts/nicam-snr-loop-2026-05-05/nicam-tx-spectrum-2mhz-relative-2026-05-05.png)
+
+De kleine meetplots en CSV-bestanden onder `artifacts/` horen bij de
+documentatie. Grote ruwe testbestanden zoals `*.u8iq`, `*.pcm` en `*.npy`
+blijven buiten git.
 
 ## PlutoSDR uitzenden
 
