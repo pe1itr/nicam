@@ -377,7 +377,7 @@ static int attr_list_choose_rate(const char *text, long long minimum, long long 
     long long range_max = 0;
     if (sscanf(text, " [ %lld %lld %lld ]", &range_min, &range_step, &range_max) == 3 &&
         range_step > 0 && range_min <= range_max) {
-        const long long preferred[] = {3840000, 30720000};
+        const long long preferred[] = {2184000, 3840000, 30720000};
         for (size_t i = 0; i < sizeof(preferred) / sizeof(preferred[0]); i++) {
             long long rate = preferred[i];
             if (rate >= minimum && rate >= range_min && rate <= range_max &&
