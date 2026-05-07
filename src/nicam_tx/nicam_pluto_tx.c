@@ -1440,6 +1440,12 @@ int main(int argc, char **argv) {
     double start_time = monotonic_seconds();
     double next_push_time = start_time;
     double buffer_seconds = (double)device_buffer_samples / (double)cfg.tx_sample_rate;
+    double prof_gen = 0.0;
+    double prof_resample = 0.0;
+    double prof_copy = 0.0;
+    double prof_sleep = 0.0;
+    double prof_push = 0.0;
+    long long prof_buffers = 0;
 
     while (!stop_requested) {
         size_t frames_this = cfg.buffer_frames;
@@ -1450,6 +1456,7 @@ int main(int argc, char **argv) {
             }
         }
 
+        double t0 = monotonic_seconds();
         for (size_t f = 0; f < frames_this; f++) {
             generate_frame(&cfg, pcm_fp, &j17, &shaper, frames_sent + (long long)f, &phase_quarter,
                            iq_i + f * IQ_SAMPLES_PER_FRAME, iq_q + f * IQ_SAMPLES_PER_FRAME);
@@ -1458,6 +1465,7 @@ int main(int argc, char **argv) {
             memset(iq_i + f * IQ_SAMPLES_PER_FRAME, 0, IQ_SAMPLES_PER_FRAME * sizeof(int16_t));
             memset(iq_q + f * IQ_SAMPLES_PER_FRAME, 0, IQ_SAMPLES_PER_FRAME * sizeof(int16_t));
         }
+        double t1 = monotonic_seconds();
 
         size_t baseband_samples_this = frames_this * IQ_SAMPLES_PER_FRAME;
         size_t device_samples_this = (size_t)(((long long)baseband_samples_this * cfg.tx_sample_rate) / cfg.baseband_sample_rate);
@@ -1470,6 +1478,7 @@ int main(int argc, char **argv) {
             memset(tx_i_buf + resampled, 0, (device_buffer_samples - resampled) * sizeof(int16_t));
             memset(tx_q_buf + resampled, 0, (device_buffer_samples - resampled) * sizeof(int16_t));
         }
+        double t2 = monotonic_seconds();
 
         char *pi = iio_buffer_first(buf, tx_i);
         char *pq = iio_buffer_first(buf, tx_q);
@@ -1481,15 +1490,25 @@ int main(int argc, char **argv) {
             pi += step;
             pq += step;
         }
+        double t3 = monotonic_seconds();
 
         if (cfg.realtime && buffers_sent > 0) {
             sleep_until(next_push_time);
         }
+        double t4 = monotonic_seconds();
         ssize_t pushed = iio_buffer_push(buf);
+        double t5 = monotonic_seconds();
         if (pushed < 0) {
             fprintf(stderr, "iio_buffer_push faalde: %s\n", strerror((int)-pushed));
             break;
         }
+
+        prof_gen += t1 - t0;
+        prof_resample += t2 - t1;
+        prof_copy += t3 - t2;
+        prof_sleep += t4 - t3;
+        prof_push += t5 - t4;
+        prof_buffers++;
 
         buffers_sent++;
         frames_sent += (long long)frames_this;
@@ -1509,6 +1528,21 @@ int main(int argc, char **argv) {
                     "elapsed=%.2f nominal=%.2f realtime=%d source=%d\n",
                     buffers_sent, frames_sent, samples_sent, elapsed, nominal,
                     cfg.realtime, (int)cfg.source);
+            if (prof_buffers > 0) {
+                double scale = 1000.0 / (double)prof_buffers;
+                fprintf(stderr,
+                        "nicam_pluto_tx: profile_ms_per_buffer gen=%.3f resample=%.3f copy=%.3f sleep=%.3f push=%.3f total=%.3f buffers=%lld\n",
+                        prof_gen * scale, prof_resample * scale, prof_copy * scale,
+                        prof_sleep * scale, prof_push * scale,
+                        (prof_gen + prof_resample + prof_copy + prof_sleep + prof_push) * scale,
+                        prof_buffers);
+                prof_gen = 0.0;
+                prof_resample = 0.0;
+                prof_copy = 0.0;
+                prof_sleep = 0.0;
+                prof_push = 0.0;
+                prof_buffers = 0;
+            }
         }
         if (max_frames > 0 && frames_sent >= max_frames) {
             break;
