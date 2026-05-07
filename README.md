@@ -6,10 +6,11 @@ keten bevat een echte NICAM 728 payload encoder/decoder, een standalone
 C-zender voor PlutoSDR en een standalone C-ontvanger voor live RTL-SDR
 ontvangst.
 
-De NICAM Python-prototypes zijn uitgefaseerd; de normale NICAM TX/RX-paden
-lopen via de C-programma's `nicam-pluto-tx` en `nicam-rx`.
+Voor NICAM zijn de normale TX/RX-paden volledig C-gebaseerd:
+`nicam-pluto-tx` voor PlutoSDR TX en `nicam-rx` voor RTL-SDR RX. De aparte WBFM
+TX/RX-paden en sommige ontwikkel- of analysetools gebruiken Python.
 
-## Signaalparameters
+## Karakteristieken
 
 - NICAM bitrate: `728 kbit/s`
 - DQPSK symbolrate: `364 ksym/s`
@@ -19,14 +20,22 @@ lopen via de C-programma's `nicam-pluto-tx` en `nicam-rx`.
 - Scrambler: PN9, polynomial `x^9 + x^4 + 1`, seed `111111111`
 - Audio: stereo, 32 kHz, NICAM 728 near-instantaneous companding
 - Direct-QPSK mode: stem de RTL-SDR af op de NICAM RF-carrier zelf
+- NICAM baseband sample-rate: `1456000` samples/s, precies 4 samples per
+  DQPSK-symbool
+- Pluto/IIO TX device sample-rate: automatisch gekozen of ingesteld met
+  `NICAM_TX_DEVICE_SAMPLE_RATE`; de NICAM timing blijft intern `1456000`
 
-Voor de eerste receiver is `1.456 MS/s` gekozen, precies 4 samples per DQPSK
-symbool. Dat houdt de timing in deze experimentele versie eenvoudig.
+De normale entry points zijn:
+
+- `tools/tim-nicam-tx`: NICAM TX via PlutoSDR/libiio
+- `tools/websdr-nicam-rx`: NICAM RX via RTL-SDR
+- `tools/tim-wbfm-tx`: optionele WBFM TX, Python-gebaseerd
+- `tools/websdr-wbfm-rx`: optionele WBFM RX, Python-gebaseerd
 
 ## Standalone C-ontvanger
 
 Voor live gebruik op de Odroid is er een standalone C-programma met de naam
-`nicam-rx`. Dit programma heeft geen Python nodig tijdens runtime:
+`nicam-rx`:
 
 - stdin: `rtl_sdr`-achtige unsigned 8-bit IQ (`I,Q,I,Q,...`)
 - stdout: raw stereo `s16le` audio op `32 kHz`
@@ -109,23 +118,59 @@ Voor het upconverter-testplan:
 - 50-70 MHz filter na de mixer
 - RTL-SDR op `54.552 MHz`
 
-De C-decoder is getest tegen dezelfde IQ-bestanden als de Python ontvanger. Op
-een 30 seconden 10 dB SNR testbestand gaf `./nicam-rx` exact dezelfde audio-samples
-als de Python ontvanger en decodeerde hij ongeveer in real-time factor 30
-sneller dan nodig.
+De C-decoder is getest tegen referentie-IQ-bestanden. Op een 30 seconden 10 dB
+SNR testbestand decodeerde `./nicam-rx` ongeveer in real-time factor 30 sneller
+dan nodig.
 
 ## Installatie
 
-Kies de methode die past bij de target machine.
+De normale NICAM TX/RX-launchers starten de C-programma's `./nicam-pluto-tx` en
+`./nicam-rx`. Voor NICAM is dus een C compiler nodig plus de tools/libraries van
+de gebruikte SDR.
 
-Optie A: user-installatie (zonder venv):
+NICAM TX-host met PlutoSDR/AD9361:
+
+```sh
+sudo apt install build-essential ffmpeg libiio-dev
+tools/build-nicam-pluto-tx
+```
+
+Dit bouwt `./nicam-pluto-tx`. De zender gebruikt `ffmpeg` alleen om stream-,
+file- of UDP-audio naar raw stereo `s16le` op 32 kHz om te zetten.
+
+NICAM RX-host met RTL-SDR:
+
+```sh
+sudo apt install build-essential rtl-sdr alsa-utils
+make
+```
+
+Dit bouwt `./nicam-rx`. `alsa-utils` is nodig wanneer je via `aplay` luistert;
+voor `ffplay` playback installeer je ook `ffmpeg`.
+
+Lokale machineprofielen maak je uit de examples:
+
+```sh
+cp config/environments/tim.env.example config/environments/tim.env
+cp config/environments/websdr.env.example config/environments/websdr.env
+```
+
+Commit deze lokale `.env` bestanden niet.
+
+### Optionele WBFM-installatie
+
+De Python requirements horen bij de aparte WBFM Python-zender/ontvanger en bij
+het direct starten van Python modules uit `src/wbfm_*`. Sla deze WBFM-stap over
+wanneer je alleen de C-binaries `./nicam-pluto-tx` en `./nicam-rx` gebruikt.
+
+Optie A voor WBFM: user-installatie (zonder venv):
 
 ```sh
 python3 -m pip install --user -r requirements.txt
 python3 -m pip install --user -e .
 ```
 
-Optie B: virtual environment (`venv`):
+Optie B voor WBFM: virtual environment (`venv`):
 
 ```sh
 python3 -m venv .venv
@@ -134,13 +179,9 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
-Daarnaast moet de `rtl_sdr` command line tool beschikbaar zijn, bijvoorbeeld uit
-het pakket `rtl-sdr`. Voor `--stream-url` en `--audio-file` is ook `ffmpeg`
-nodig.
-
-Voor systemd user-services is het aan te raden overal `python3` te gebruiken,
-zodat je niet afhankelijk bent van een eventuele andere `python` default op het
-systeem.
+Voor de NICAM launchers (`tools/tim-nicam-tx` en `tools/websdr-nicam-rx`) zijn
+de C-binaries `./nicam-pluto-tx` en `./nicam-rx` bepalend. De WBFM launchers
+gebruiken wel Python via `tools/nicam-run`.
 
 ## C ontvanger starten
 
@@ -495,12 +536,12 @@ tools/websdr-wbfm-rx --no-squelch
 
 ## Machineprofielen en uniforme start
 
-Voor machines met verschillende Python-installaties en audio-uitgangen staat er
-een launcher in `tools/nicam-run`. Die laadt eerst een profiel uit
-`config/environments/` en start daarna de juiste module met dezelfde commando's
-op elke host.
+De launchers lezen hostspecifieke defaults uit `config/environments/`. Voor
+NICAM gebruiken `tools/tim-nicam-tx` en `tools/websdr-nicam-rx` deze profielen
+voor SDR-instellingen, audio-routing en standaardfrequenties. Voor WBFM gebruikt
+`tools/nicam-run` dezelfde profielen ook om de juiste Python-omgeving te kiezen.
 
-Profielkeuze:
+Profielkeuze voor `tools/nicam-run` en de host-launchers:
 
 ```sh
 tools/nicam-run wbfm-rx ...
@@ -521,16 +562,16 @@ Voorbeeldprofielen staan in:
 - `config/environments/desktop.env.example`
 - `config/environments/user-install.env.example`
 
-De belangrijkste profielvelden:
+Belangrijke profielvelden:
 
 ```sh
-PYTHON_MODE=src        # src, user of venv
-PYTHON_BIN=python3
-VENV_PATH=${REPO_DIR}/.venv
 AUDIO_BACKEND=aplay   # stdout, ffplay, aplay of none
 AUDIO_DEVICE=plughw:0,0
 NICAM_AUDIO_RATE=32000
 WBFM_AUDIO_RATE=48000
+PYTHON_MODE=src        # alleen relevant voor WBFM/module starts: src, user of venv
+PYTHON_BIN=python3
+VENV_PATH=${REPO_DIR}/.venv
 ```
 
 Voorbeelden:
