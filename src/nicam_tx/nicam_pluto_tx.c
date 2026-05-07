@@ -545,6 +545,34 @@ static int resolve_tx_sample_rate(
     return 0;
 }
 
+static int choose_fallback_tx_sample_rate(
+    struct iio_channel *tx_phy,
+    struct iio_channel *tx_i,
+    long long minimum_rate,
+    long long failed_rate,
+    long long *fallback_rate
+) {
+    char available[1024];
+    memset(available, 0, sizeof(available));
+    if (read_sampling_frequency_available(tx_phy, tx_i, available, sizeof(available)) < 0) {
+        return -1;
+    }
+    if (attr_list_choose_rate(available, minimum_rate, fallback_rate) < 0) {
+        return -1;
+    }
+    if (*fallback_rate == failed_rate) {
+        long long next_minimum = failed_rate + 1;
+        if (attr_list_choose_rate(available, next_minimum, fallback_rate) < 0 ||
+            *fallback_rate == failed_rate) {
+            return -1;
+        }
+    }
+    fprintf(stderr,
+            "nicam_pluto_tx: sampling_frequency %lld Hz werd geweigerd; auto valt terug naar %lld Hz. sampling_frequency_available: %s\n",
+            failed_rate, *fallback_rate, available);
+    return 0;
+}
+
 static int resolve_iio_uri(Config *cfg) {
     if (cfg->uri != NULL) {
         snprintf(cfg->resolved_uri, sizeof(cfg->resolved_uri), "%s", cfg->uri);
@@ -1273,23 +1301,42 @@ int main(int argc, char **argv) {
         return 1;
     }
 
-    if (resolve_tx_sample_rate(ctx, tx_phy, tx_i, cfg.baseband_sample_rate, cfg.tx_sample_rate,
-                               cfg.tx_sample_rate_explicit, &cfg.tx_sample_rate) < 0) {
+    if (resolve_tx_sample_rate(ctx, tx_phy, tx_i, cfg.baseband_sample_rate,
+                               cfg.tx_sample_rate, cfg.tx_sample_rate_explicit, &cfg.tx_sample_rate) < 0) {
         iio_context_destroy(ctx);
         if (pcm_fp != stdin) {
             fclose(pcm_fp);
         }
         return 1;
     }
+
+    if (write_ll_attr(tx_lo, "frequency", cfg.lo_hz) < 0) {
+        iio_context_destroy(ctx);
+        if (pcm_fp != stdin) {
+            fclose(pcm_fp);
+        }
+        return 1;
+    }
+    if (write_ll_attr(tx_phy, "sampling_frequency", cfg.tx_sample_rate) < 0) {
+        if (cfg.tx_sample_rate_explicit ||
+            choose_fallback_tx_sample_rate(tx_phy, tx_i, cfg.baseband_sample_rate,
+                                           cfg.tx_sample_rate, &cfg.tx_sample_rate) < 0 ||
+            write_ll_attr(tx_phy, "sampling_frequency", cfg.tx_sample_rate) < 0) {
+            iio_context_destroy(ctx);
+            if (pcm_fp != stdin) {
+                fclose(pcm_fp);
+            }
+            return 1;
+        }
+    }
+
     long long rate_gcd = gcd_ll(cfg.baseband_sample_rate, cfg.tx_sample_rate);
     fprintf(stderr,
             "nicam_pluto_tx: NICAM baseband sample rate=%lld Hz, Pluto/IIO TX sample rate=%lld Hz, resampler=%lld/%lld, RF bandwidth=%lld Hz\n",
             cfg.baseband_sample_rate, cfg.tx_sample_rate,
             cfg.tx_sample_rate / rate_gcd, cfg.baseband_sample_rate / rate_gcd, cfg.rf_bandwidth);
 
-    if (write_ll_attr(tx_lo, "frequency", cfg.lo_hz) < 0 ||
-        write_ll_attr(tx_phy, "sampling_frequency", cfg.tx_sample_rate) < 0 ||
-        write_ll_attr(tx_phy, "rf_bandwidth", cfg.rf_bandwidth) < 0 ||
+    if (write_ll_attr(tx_phy, "rf_bandwidth", cfg.rf_bandwidth) < 0 ||
         write_double_attr(tx_phy, "hardwaregain", cfg.tx_gain) < 0) {
         iio_context_destroy(ctx);
         if (pcm_fp != stdin) {
