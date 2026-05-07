@@ -55,6 +55,12 @@ config/environments/*.env
 
 # Project-specific artifacts
 *.iq
+*.u8iq
+*.pcm
+*.npy
+.codex
+artifacts/
+docs/
 /nicam
 /nicam-rx
 /nicam-pluto-u8-tx
